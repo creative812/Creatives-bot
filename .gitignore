@@ -1,0 +1,15 @@
+# Environment variables (contains your bot token)
+.env
+
+# Node modules folder
+node_modules/
+
+# Log files
+*.log
+
+# Database files (optional - if you don't want to share your bot's data)
+*.db
+
+# Optional: build folders
+/dist
+/build

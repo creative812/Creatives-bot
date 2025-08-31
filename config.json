@@ -1,0 +1,34 @@
+{
+    "prefix": "!",
+    "token": "PLACEHOLDER_TOKEN",
+    "clientId": "PLACEHOLDER_CLIENT_ID", 
+    "guildId": "PLACEHOLDER_GUILD_ID",
+    "ownerId": "PLACEHOLDER_OWNER_ID",
+    "embedColor": "#7289DA",
+    "errorColor": "#FF0000",
+    "successColor": "#00FF00",
+    "warningColor": "#FFA500",
+    "maxWarnings": 3,
+    "defaultMuteTime": "1h",
+    "maxPurgeAmount": 1000,
+    "giveawayColor": "#FFD700",
+    "logsRetentionDays": 30,
+    "autoDeleteWarningsAfterDays": 90,
+    "rateLimitWindow": 60000,
+    "rateLimitMax": 10,
+    "database": {
+        "path": "./data/bot.db"
+    },
+    "permissions": {
+        "admin": ["Administrator", "ManageGuild"],
+        "moderator": ["ModerateMembers", "ManageMessages", "KickMembers", "BanMembers"],
+        "helper": ["ManageMessages"]
+    },
+    "automod": {
+        "enabled": true,
+        "spamThreshold": 5,
+        "mentionThreshold": 5,
+        "capsThreshold": 70,
+        "linkWhitelist": ["discord.gg", "youtube.com", "github.com"]
+    }
+}

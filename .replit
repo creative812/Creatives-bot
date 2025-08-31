@@ -1,0 +1,49 @@
+modules = ["nodejs-20"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+packages = ["got"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Discord Bot"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "discord_bot"
+
+[[workflows.workflow]]
+name = "Discord Bot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm install discord.js better-sqlite3 node-cron ms && node index.js"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "discord_bot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm install discord.js better-sqlite3 node-cron ms"
+
+[[ports]]
+localPort = 3000
+externalPort = 80
+
+[[ports]]
+localPort = 8080

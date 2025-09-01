@@ -19,7 +19,7 @@ db.pragma('journal_mode = WAL');
 // Initialize all necessary tables and ensure columns exist, including safe migrations
 const initTables = () => {
     try {
-        // Guild settings table
+        // Guild settings table - UPDATED WITH AI FIELDS
         db.exec(`
             CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id TEXT PRIMARY KEY,
@@ -32,6 +32,10 @@ const initTables = () => {
                 leave_message TEXT,
                 embed_color TEXT DEFAULT '#7289DA',
                 automod_enabled INTEGER DEFAULT 1,
+                ai_enabled INTEGER DEFAULT 0,
+                ai_channel_id TEXT,
+                ai_trigger_symbol TEXT DEFAULT '!',
+                ai_personality TEXT DEFAULT 'casual',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -203,6 +207,12 @@ const initTables = () => {
         addColumnIfNotExists('ticket_settings', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
         addColumnIfNotExists('ticket_settings', 'staff_role_ids', 'TEXT');
 
+        // AI COLUMNS MIGRATION - Add these for existing databases
+        addColumnIfNotExists('guild_settings', 'ai_enabled', 'INTEGER DEFAULT 0');
+        addColumnIfNotExists('guild_settings', 'ai_channel_id', 'TEXT');
+        addColumnIfNotExists('guild_settings', 'ai_trigger_symbol', "TEXT DEFAULT '!'");
+        addColumnIfNotExists('guild_settings', 'ai_personality', "TEXT DEFAULT 'casual'");
+
         Logger.info('Database tables initialized successfully');
     } catch (error) {
         Logger.error('Error initializing database tables:', error);
@@ -217,12 +227,12 @@ console.log('ticket_settings columns:', db.prepare("PRAGMA table_info(ticket_set
 
 // Prepared SQL statements for all features (leveling, tickets, giveaways, moderation, etc.)
 const statements = {
-    // Guild settings
+    // Guild settings - UPDATED TO INCLUDE AI FIELDS
     getGuildSettings: db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?'),
     setGuildSettings: db.prepare(`INSERT OR REPLACE INTO guild_settings
         (guild_id, prefix, log_channel_id, welcome_channel_id, mute_role_id, auto_role_id,
-        welcome_message, leave_message, embed_color, automod_enabled, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        welcome_message, leave_message, embed_color, automod_enabled, ai_enabled, ai_channel_id, ai_trigger_symbol, ai_personality, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
     // Settings
@@ -272,13 +282,12 @@ const statements = {
     removeSelfRole: db.prepare('DELETE FROM self_roles WHERE guild_id = ? AND role_id = ?'),
     getSelfRoles: db.prepare('SELECT * FROM self_roles WHERE guild_id = ?'),
 
-    // Ticket system - ONLY FIX APPLIED HERE
+    // Ticket system
     setTicketSettings: db.prepare('INSERT OR REPLACE INTO ticket_settings (guild_id, category_id, staff_role_ids, log_channel_id, next_ticket_number, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'),
     getTicketSettings: db.prepare('SELECT * FROM ticket_settings WHERE guild_id = ?'),
     getTicketByChannel: db.prepare("SELECT * FROM tickets WHERE channel_id = ? AND status = 'open'"),
     getUserTicket: db.prepare("SELECT * FROM tickets WHERE guild_id = ? AND user_id = ? AND status = 'open'"),
     getOpenTickets: db.prepare("SELECT * FROM tickets WHERE guild_id = ? AND status = 'open' ORDER BY created_at DESC"),
-    // CRITICAL FIX: Changed parameter order to match function call
     createTicket: db.prepare('INSERT INTO tickets (guild_id, user_id, channel_id, reason, ticket_number, status) VALUES (?, ?, ?, ?, ?, \'open\')'),
     closeTicket: db.prepare("UPDATE tickets SET status = 'closed', closed_at = CURRENT_TIMESTAMP, closed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"),
     claimTicket: db.prepare('UPDATE tickets SET claimed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'),
@@ -289,55 +298,51 @@ const statements = {
     cleanupOldTickets: db.prepare("DELETE FROM tickets WHERE status = 'closed' AND closed_at <= date('now', '-90 days')")
 };
 
-// Helpers for database operations (ALL YOUR ORIGINAL FUNCTIONS PRESERVED)
+// Helpers for database operations (ALL YOUR ORIGINAL FUNCTIONS PRESERVED + AI FUNCTIONS ADDED)
 const DatabaseHelpers = {
     getGuildSettings: (guildId) => statements.getGuildSettings.get(guildId),
 
+    // UPDATED TO HANDLE AI FIELDS
     setGuildSetting: (guildId, setting, value) => {
         const current = statements.getGuildSettings.get(guildId) || {};
         current[setting] = value;
         return statements.setGuildSettings.run(
             guildId, current.prefix || '!', current.log_channel_id, current.welcome_channel_id,
             current.mute_role_id, current.auto_role_id, current.welcome_message, current.leave_message,
-            current.embed_color || '#7289DA', current.automod_enabled === undefined ? 1 : current.automod_enabled
+            current.embed_color || '#7289DA', current.automod_enabled === undefined ? 1 : current.automod_enabled,
+            current.ai_enabled === undefined ? 0 : current.ai_enabled, current.ai_channel_id || null,
+            current.ai_trigger_symbol || '!', current.ai_personality || 'casual'
         );
     },
 
     setSetting: (guildId, key, value) => statements.setSetting.run(guildId, key, value),
-
     getSetting: (guildId, key) => {
         const res = statements.getSetting.get(guildId, key);
         return res ? res.value : null;
     },
-
     getUser: (guildId, userId) => {
         statements.insertUser.run(guildId, userId);
         return statements.getUser.get(guildId, userId);
     },
-
     updateUser: (guildId, userId, exp, lvl, messages) => statements.updateUser.run(exp, lvl, messages, guildId, userId),
     resetUser: (guildId, userId) => statements.resetUser.run(guildId, userId),
     resetAllUsers: (guildId) => statements.resetAllUsers.run(guildId),
     getLeaderboardByLevel: (guildId, limit = 10) => statements.getLeaderboardByLevel.all(guildId, limit),
     getLeaderboardByMessages: (guildId, limit = 10) => statements.getLeaderboardByMessages.all(guildId, limit),
-
     setRoleForLevel: (guildId, lvl, roleid) => statements.setRoleForLevel.run(guildId, lvl, roleid),
     getRoleForLevel: (guildId, lvl) => {
         const r = statements.getRoleForLevel.get(guildId, lvl);
         return r ? r.roleid : null;
     },
-
     addWarning: (guildId, userId, moderatorId, reason, expiresAt = null) =>
         statements.addWarning.run(guildId, userId, moderatorId, reason, expiresAt),
     getWarnings: (guildId, userId) => statements.getWarnings.all(guildId, userId),
     clearWarnings: (guildId, userId) => statements.clearWarnings.run(guildId, userId),
-
     addMute: (guildId, userId, moderatorId, reason, expiresAt) =>
         statements.addMute.run(guildId, userId, moderatorId, reason, expiresAt),
     getMute: (guildId, userId) => statements.getMute.get(guildId, userId),
     removeMute: (guildId, userId) => statements.removeMute.run(guildId, userId),
     getExpiredMutes: () => statements.getExpiredMutes.all(),
-
     createGiveaway: (guildId, channelId, messageId, hostId, title, description, winnerCount, requirements, endsAt) =>
         statements.createGiveaway.run(guildId, channelId, messageId, hostId, title, description, winnerCount, requirements, endsAt),
     getGiveaway: (messageId) => statements.getGiveaway.get(messageId),
@@ -346,16 +351,13 @@ const DatabaseHelpers = {
     addGiveawayEntry: (giveawayId, userId) => statements.addGiveawayEntry.run(giveawayId, userId),
     getGiveawayEntries: (giveawayId) => statements.getGiveawayEntries.all(giveawayId),
     removeGiveawayEntry: (giveawayId, userId) => statements.removeGiveawayEntry.run(giveawayId, userId),
-
     addModLog: (guildId, actionType, targetUserId, moderatorId, reason, duration = null) =>
         statements.addModLog.run(guildId, actionType, targetUserId, moderatorId, reason, duration),
     getModLogs: (guildId, limit = 50) => statements.getModLogs.all(guildId, limit),
-
     addSelfRole: (guildId, roleId, emoji, description) =>
         statements.addSelfRole.run(guildId, roleId, emoji, description),
     removeSelfRole: (guildId, roleId) => statements.removeSelfRole.run(guildId, roleId),
     getSelfRoles: (guildId) => statements.getSelfRoles.all(guildId),
-
     setTicketSettings(guildId, settings) {
         try {
             const staffRoleIds = Array.isArray(settings.staffRoleIds) 
@@ -372,7 +374,6 @@ const DatabaseHelpers = {
             Logger.error('Error setting ticket settings:', error);
         }
     },
-
     getTicketSettings(guildId) {
         try {
             return statements.getTicketSettings.get(guildId);
@@ -381,7 +382,6 @@ const DatabaseHelpers = {
             return null;
         }
     },
-
     getNextTicketNumber(guildId) {
         try {
             const settings = this.getTicketSettings(guildId);
@@ -399,12 +399,9 @@ const DatabaseHelpers = {
             return 1;
         }
     },
-
-    // ONLY FIX APPLIED: Parameter order to match the corrected SQL statement
     createTicket(guildId, userId, channelId, reason, ticketNumber) {
         try {
             console.log('Creating ticket with params:', { guildId, userId, channelId, reason, ticketNumber });
-            // SQL expects: (guild_id, user_id, channel_id, reason, ticket_number, status)
             const result = statements.createTicket.run(guildId, userId, channelId, reason, ticketNumber);
             console.log('Ticket created with ID:', result.lastInsertRowid);
             return result.lastInsertRowid;
@@ -414,7 +411,6 @@ const DatabaseHelpers = {
             return null;
         }
     },
-
     getTicketByChannel(channelId) {
         try {
             console.log('Looking for ticket in channel:', channelId);
@@ -427,7 +423,6 @@ const DatabaseHelpers = {
             return null;
         }
     },
-
     getUserTicket(guildId, userId) {
         try {
             return statements.getUserTicket.get(guildId, userId);
@@ -436,7 +431,6 @@ const DatabaseHelpers = {
             return null;
         }
     },
-
     getOpenTickets(guildId) {
         try {
             return statements.getOpenTickets.all(guildId);
@@ -445,7 +439,6 @@ const DatabaseHelpers = {
             return [];
         }
     },
-
     closeTicket(ticketId, closedBy) {
         try {
             console.log('Closing ticket:', ticketId, 'by user:', closedBy);
@@ -456,7 +449,6 @@ const DatabaseHelpers = {
             Logger.error('Error closing ticket:', error);
         }
     },
-
     claimTicket(ticketId, claimedBy) {
         try {
             statements.claimTicket.run(claimedBy, ticketId);
@@ -464,7 +456,6 @@ const DatabaseHelpers = {
             Logger.error('Error claiming ticket:', error);
         }
     },
-
     getStaffRoleIds(guildId) {
         try {
             const settings = this.getTicketSettings(guildId);
@@ -479,12 +470,53 @@ const DatabaseHelpers = {
             return [];
         }
     },
-
     cleanupOldData() {
         statements.cleanupOldWarnings.run();
         statements.cleanupOldLogs.run();
         statements.cleanupOldTickets.run();
         Logger.info('Cleaned up old warnings, logs, and tickets');
+    },
+
+    // NEW AI HELPER FUNCTIONS
+    setAISetting(guildId, setting, value) {
+        const current = statements.getGuildSettings.get(guildId) || {};
+        current[setting] = value;
+        return statements.setGuildSettings.run(
+            guildId,
+            current.prefix || '!',
+            current.log_channel_id,
+            current.welcome_channel_id,
+            current.mute_role_id,
+            current.auto_role_id,
+            current.welcome_message,
+            current.leave_message,
+            current.embed_color || '#7289DA',
+            current.automod_enabled === undefined ? 1 : current.automod_enabled,
+            setting === 'ai_enabled' ? (value ? 1 : 0) : (current.ai_enabled === undefined ? 0 : current.ai_enabled),
+            setting === 'ai_channel_id' ? value : (current.ai_channel_id || null),
+            setting === 'ai_trigger_symbol' ? value : (current.ai_trigger_symbol || '!'),
+            setting === 'ai_personality' ? value : (current.ai_personality || 'casual')
+        );
+    },
+
+    getAISetting(guildId) {
+        try {
+            const row = statements.getGuildSettings.get(guildId);
+            return {
+                ai_enabled: row?.ai_enabled === undefined ? 0 : row.ai_enabled,
+                ai_channel_id: row?.ai_channel_id || null,
+                ai_trigger_symbol: row?.ai_trigger_symbol || '!',
+                ai_personality: row?.ai_personality || 'casual'
+            };
+        } catch (error) {
+            Logger.error('Error getting AI settings:', error);
+            return {
+                ai_enabled: 0,
+                ai_channel_id: null,
+                ai_trigger_symbol: '!',
+                ai_personality: 'casual'
+            };
+        }
     }
 };
 

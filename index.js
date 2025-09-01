@@ -82,11 +82,34 @@ client.guildSettingsCache = new Map();
 const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
 for (const file of commandFiles) {
     const commandModule = require(`./commands/${file}`);
-    if (commandModule.commands) {
+
+    // Handle both single command exports and command arrays
+    if (commandModule.data && Array.isArray(commandModule.data)) {
+        // AI.js style - array of commands in data property
+        for (const commandData of commandModule.data) {
+            client.commands.set(commandData.name, {
+                data: commandData,
+                execute: commandModule.execute
+            });
+        }
+    } else if (commandModule.commands) {
+        // Existing style - commands array
         for (const cmd of commandModule.commands) {
             client.commands.set(cmd.name, cmd);
         }
+    } else if (commandModule.data) {
+        // Single command export
+        client.commands.set(commandModule.data.name, commandModule);
     }
+}
+
+// Store AI command module for message handling
+let aiCommandModule = null;
+try {
+    aiCommandModule = require('./commands/ai.js');
+    Logger.info('AI command module loaded successfully');
+} catch (error) {
+    Logger.warn('AI command module not found or failed to load:', error.message);
 }
 
 /**
@@ -168,7 +191,6 @@ const getCachedGuildSettings = (guildId) => {
     if (client.guildSettingsCache.has(guildId)) {
         return client.guildSettingsCache.get(guildId);
     }
-
     const settings = client.db.getTicketSettings(guildId);
     if (settings) {
         client.guildSettingsCache.set(guildId, settings);
@@ -222,7 +244,6 @@ const handleTicketCreation = async (interaction) => {
     }
 
     const userLockKey = `ticket_create_${guildId}_${userId}`;
-
     if (client.processingLocks.has(userLockKey)) {
         return await safeReply(interaction, {
             content: '❌ Please wait, your previous ticket creation is still processing.',
@@ -413,7 +434,6 @@ const handleTicketCreation = async (interaction) => {
  */
 const handleTicketClaim = async (interaction) => {
     const claimLockKey = `claim_${interaction.channel.id}_${interaction.user.id}`;
-
     if (client.processingLocks.has(claimLockKey)) {
         return await safeReply(interaction, {
             content: '❌ Claim already in progress.',
@@ -428,7 +448,6 @@ const handleTicketClaim = async (interaction) => {
 
         // Try multiple methods to find ticket
         let ticket = client.db.getTicketByChannel(channelId);
-
         if (!ticket) {
             const allTickets = client.db.getOpenTickets(interaction.guild.id);
             ticket = allTickets.find(t => t.channel_id === channelId);
@@ -502,7 +521,6 @@ const handleTicketClaim = async (interaction) => {
     } catch (error) {
         console.error('Error claiming ticket:', error.code, error.message);
         client.logger.error('Error claiming ticket:', { code: error.code, message: error.message, path: 'handleTicketClaim' });
-
         await safeReply(interaction, {
             content: '❌ Failed to claim ticket. Please try again.',
             ephemeral: true
@@ -542,7 +560,6 @@ const handleTicketClose = async (interaction) => {
  */
 const processTicketClose = async (interaction) => {
     const closeLockKey = `close_${interaction.channel.id}`;
-
     if (client.processingLocks.has(closeLockKey)) {
         return await safeReply(interaction, {
             content: '❌ Ticket is already being closed.',
@@ -558,7 +575,6 @@ const processTicketClose = async (interaction) => {
 
         // Find ticket
         let ticket = client.db.getTicketByChannel(channelId);
-
         if (!ticket) {
             const allTickets = client.db.getOpenTickets(interaction.guild.id);
             ticket = allTickets.find(t => t.channel_id === channelId);
@@ -637,12 +653,10 @@ const processTicketClose = async (interaction) => {
     } catch (error) {
         console.error('Error in close ticket handler:', error.code, error.message);
         client.logger.error('Error closing ticket:', { code: error.code, message: error.message, path: 'processTicketClose' });
-
         await safeReply(interaction, {
             content: '❌ Failed to close ticket. Please try again.',
             ephemeral: true
         });
-
         client.processingLocks.delete(closeLockKey);
     }
 };
@@ -661,16 +675,14 @@ client.on('interactionCreate', async interaction => {
         if (interaction.isChatInputCommand()) {
             const command = client.commands.get(interaction.commandName);
             if (command && command.execute) {
-                await command.execute(interaction, client);
+                await command.execute(interaction, client.db);
             } else {
                 await safeReply(interaction, { content: 'Unknown command', ephemeral: true });
             }
-
         } else if (interaction.isModalSubmit()) {
             if (interaction.customId === 'close_ticket_modal') {
                 await processTicketClose(interaction);
             }
-
         } else if (interaction.isStringSelectMenu()) {
             if (interaction.customId === 'ticket_staff_roles') {
                 try {
@@ -741,6 +753,7 @@ client.on('interactionCreate', async interaction => {
                         content: `**Staff Roles Selected:** ${roleList}`,
                         ephemeral: true
                     });
+
                 } catch (error) {
                     console.error('Error handling role selection:', error.code, error.message);
                     client.logger.error('Error handling role selection:', { code: error.code, message: error.message });
@@ -750,7 +763,6 @@ client.on('interactionCreate', async interaction => {
                     });
                 }
             }
-
         } else if (interaction.isButton()) {
             // Route button interactions to appropriate handlers
             switch (interaction.customId) {
@@ -778,7 +790,6 @@ client.on('interactionCreate', async interaction => {
     } catch (error) {
         console.error('Error in interactionCreate:', error.code, error.message);
         client.logger.error('Error handling interaction:', { code: error.code, message: error.message, path: 'interactionCreate' });
-
         await safeReply(interaction, { 
             content: '❌ An error occurred!', 
             ephemeral: true 
@@ -830,9 +841,14 @@ client.login(token).catch(error => {
 
 // Enhanced leveling message handler
 const { handleMessageForXp } = require('./commands/level.js');
+
 client.on('messageCreate', async message => {
+    // Skip bot messages
+    if (message.author.bot) return;
+
     const xpLockKey = `xp_${message.guild?.id}_${message.author.id}_${message.id}`;
 
+    // Prevent duplicate XP processing
     if (client.processingLocks.has(xpLockKey)) {
         return;
     }
@@ -840,10 +856,36 @@ client.on('messageCreate', async message => {
     client.processingLocks.set(xpLockKey, Date.now());
 
     try {
-        await handleMessageForXp(message, client);
+        // Handle XP for leveling system
+        if (message.guild) {
+            await handleMessageForXp(message, client);
+        }
+
+        // Handle AI responses - ADDED AI INTEGRATION
+        if (aiCommandModule && aiCommandModule.handleMessage) {
+            const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
+
+            if (!client.processingLocks.has(aiLockKey)) {
+                client.processingLocks.set(aiLockKey, Date.now());
+
+                try {
+                    await aiCommandModule.handleMessage(message, client.db);
+                } catch (error) {
+                    console.error('Error in AI message handler:', error);
+                    client.logger.error('Error in AI message handler:', { 
+                        error: error.message, 
+                        guild: message.guild?.id,
+                        user: message.author.id 
+                    });
+                } finally {
+                    client.processingLocks.delete(aiLockKey);
+                }
+            }
+        }
+
     } catch (error) {
-        console.error('Error in XP handler:', error.code, error.message);
-        client.logger.error('Error in XP handler:', { code: error.code, message: error.message });
+        console.error('Error in messageCreate handler:', error.code, error.message);
+        client.logger.error('Error in messageCreate handler:', { code: error.code, message: error.message });
     } finally {
         client.processingLocks.delete(xpLockKey);
     }
@@ -878,5 +920,4 @@ setInterval(() => {
 }, CONSTANTS.TIMEOUTS.LOCK_CLEANUP_INTERVAL);
 
 module.exports = client;
-
 console.log('Loaded commands:', Array.from(client.commands.keys()));

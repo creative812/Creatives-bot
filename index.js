@@ -1,4 +1,9 @@
-require('dotenv').config();
+require('dotenv').config({ override: true });
+console.log('🔍 Main Bot Debug:');
+console.log('Token loaded:', !!process.env.DISCORD_TOKEN);
+console.log('Token length:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.length : 0);
+console.log('Token starts with:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.substring(0, 20) + '...' : 'UNDEFINED');
+
 require('./keep_alive.js');
 const { 
     Client, 
@@ -661,7 +666,7 @@ const processTicketClose = async (interaction) => {
     }
 };
 
-// SINGLE interactionCreate handler with improved structure
+// ✅ FIXED: Single interactionCreate handler with improved structure
 client.on('interactionCreate', async interaction => {
     const lockKey = `${interaction.user.id}_${interaction.customId || interaction.commandName}_${Date.now()}`;
 
@@ -675,9 +680,12 @@ client.on('interactionCreate', async interaction => {
         if (interaction.isChatInputCommand()) {
             const command = client.commands.get(interaction.commandName);
             if (command && command.execute) {
-                await command.execute(interaction, client.db);
+                await command.execute(interaction, client);
+                // ✅ FIXED: Return here to prevent duplicate error handling
+                return;
             } else {
                 await safeReply(interaction, { content: 'Unknown command', ephemeral: true });
+                return;
             }
         } else if (interaction.isModalSubmit()) {
             if (interaction.customId === 'close_ticket_modal') {
@@ -753,7 +761,6 @@ client.on('interactionCreate', async interaction => {
                         content: `**Staff Roles Selected:** ${roleList}`,
                         ephemeral: true
                     });
-
                 } catch (error) {
                     console.error('Error handling role selection:', error.code, error.message);
                     client.logger.error('Error handling role selection:', { code: error.code, message: error.message });
@@ -787,18 +794,25 @@ client.on('interactionCreate', async interaction => {
                     break;
             }
         }
+
     } catch (error) {
         console.error('Error in interactionCreate:', error.code, error.message);
         client.logger.error('Error handling interaction:', { code: error.code, message: error.message, path: 'interactionCreate' });
-        await safeReply(interaction, { 
-            content: '❌ An error occurred!', 
-            ephemeral: true 
-        });
+
+        // ✅ FIXED: Only show error if there was actually an error and we haven't already replied
+        if (!interaction.replied && !interaction.deferred) {
+            await safeReply(interaction, { 
+                content: '❌ An error occurred!', 
+                ephemeral: true 
+            });
+        }
     } finally {
         client.processingLocks.delete(lockKey);
     }
 });
 
+// ❌ FIXED: Commented out to prevent duplicate event handlers
+/*
 // Load event files - ONLY ONCE
 const eventFiles = fs.readdirSync('./events').filter(file => file.endsWith('.js'));
 for (const file of eventFiles) {
@@ -809,6 +823,7 @@ for (const file of eventFiles) {
         client.on(event.name, (...args) => event.execute(...args, client));
     }
 }
+*/
 
 // Scheduled tasks initialization  
 const scheduledTasks = require('./scheduled/tasks.js');
@@ -861,15 +876,14 @@ client.on('messageCreate', async message => {
             await handleMessageForXp(message, client);
         }
 
-        // Handle AI responses - ADDED AI INTEGRATION
+        // ✅ FIXED: Handle AI responses with correct parameter
         if (aiCommandModule && aiCommandModule.handleMessage) {
             const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
-
             if (!client.processingLocks.has(aiLockKey)) {
                 client.processingLocks.set(aiLockKey, Date.now());
-
                 try {
-                    await aiCommandModule.handleMessage(message, client.db);
+                    // ✅ FIXED: Pass client instead of client.db
+                    await aiCommandModule.handleMessage(message, client);
                 } catch (error) {
                     console.error('Error in AI message handler:', error);
                     client.logger.error('Error in AI message handler:', { 
@@ -899,14 +913,12 @@ setInterval(() => {
     const expiredLocks = Array.from(client.processingLocks.entries())
         .filter(([key, timestamp]) => now - timestamp > CONSTANTS.TIMEOUTS.LOCK_TTL)
         .map(([key]) => key);
-
     expiredLocks.forEach(key => client.processingLocks.delete(key));
 
     // Clean up rate limits
     const expiredRateLimits = Array.from(client.rateLimits.entries())
         .filter(([key, data]) => now > data.resetTime)
         .map(([key]) => key);
-
     expiredRateLimits.forEach(key => client.rateLimits.delete(key));
 
     // Clean up guild settings cache (every 10 minutes)

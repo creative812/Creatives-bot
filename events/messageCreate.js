@@ -5,11 +5,48 @@ const config = require('../config.json');
 // Rate limiting
 const cooldowns = new Map();
 
+// ✅ ADDED: Load AI module
+let aiCommandModule = null;
+try {
+    aiCommandModule = require('../commands/ai.js');
+} catch (error) {
+    console.log('AI module not found');
+}
+
 module.exports = {
     name: 'messageCreate',
-    execute(message, client) {
+    async execute(message, client) {
         // Ignore bots and DMs
         if (message.author.bot || !message.guild) return;
+
+        // ✅ ADDED: Handle XP for leveling system
+        const xpLockKey = `xp_${message.guild?.id}_${message.author.id}_${message.id}`;
+        if (!client.processingLocks.has(xpLockKey)) {
+            client.processingLocks.set(xpLockKey, Date.now());
+            try {
+                const { handleMessageForXp } = require('../commands/level.js');
+                await handleMessageForXp(message, client);
+            } catch (error) {
+                console.error('Error in XP handler:', error);
+            } finally {
+                client.processingLocks.delete(xpLockKey);
+            }
+        }
+
+        // ✅ ADDED: Handle AI responses
+        if (aiCommandModule && aiCommandModule.handleMessage) {
+            const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
+            if (!client.processingLocks.has(aiLockKey)) {
+                client.processingLocks.set(aiLockKey, Date.now());
+                try {
+                    await aiCommandModule.handleMessage(message, client);
+                } catch (error) {
+                    console.error('Error in AI message handler:', error);
+                } finally {
+                    client.processingLocks.delete(aiLockKey);
+                }
+            }
+        }
 
         // Get guild settings
         const guildSettings = client.db.getGuildSettings(message.guild.id);
@@ -116,7 +153,6 @@ module.exports = {
 
             // Log command usage
             client.logger.logCommand(commandName, message.author, message.guild);
-
         } catch (error) {
             client.logger.error(`Error executing prefix command ${commandName}:`, error);
             message.reply({ 
@@ -171,18 +207,17 @@ function handleAutoModeration(message, client, settings) {
         const reason = `Auto-moderation: ${violations.join(', ')}`;
         try {
             client.db.addWarning(message.guild.id, message.author.id, client.user.id, reason);
-            
+
             // Send warning message
             const embed = EmbedManager.createWarningEmbed('Auto-Moderation', 
                 `${message.author}, your message was removed for: ${violations.join(', ')}`);
-            
+
             message.channel.send({ embeds: [embed] }).then(msg => {
                 // Delete warning message after 10 seconds
                 setTimeout(() => msg.delete().catch(() => {}), 10000);
             });
 
             client.logger.logModeration('Auto-Moderation', message.author, client.user, message.guild, reason);
-
         } catch (error) {
             client.logger.error('Error in auto-moderation:', error);
         }
@@ -207,10 +242,10 @@ function hasSpam(content, threshold) {
  */
 function hasExcessiveCaps(content, threshold) {
     if (content.length < 10) return false;
-    
+
     const uppercaseCount = (content.match(/[A-Z]/g) || []).length;
     const letterCount = (content.match(/[A-Za-z]/g) || []).length;
-    
+
     return letterCount > 0 && (uppercaseCount / letterCount) * 100 > threshold;
 }
 
@@ -223,9 +258,9 @@ function hasExcessiveCaps(content, threshold) {
 function hasSuspiciousLinks(content, whitelist) {
     const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
     const urls = content.match(urlRegex);
-    
+
     if (!urls) return false;
-    
+
     return urls.some(url => {
         try {
             const domain = new URL(url).hostname.toLowerCase();
@@ -267,17 +302,17 @@ function checkPermissions(member, permissions) {
 function isRateLimited(userId, commandName) {
     const key = `${userId}-${commandName}`;
     const now = Date.now();
-    
+
     if (!cooldowns.has(key)) {
         cooldowns.set(key, now);
         return false;
     }
-    
+
     const lastUsed = cooldowns.get(key);
     if (now - lastUsed < config.rateLimitWindow) {
         return true;
     }
-    
+
     cooldowns.set(key, now);
     return false;
 }
@@ -303,6 +338,6 @@ function getArgIndex(command, optionName) {
         message: 0,
         content: 0
     };
-    
+
     return argMappings[optionName] || 0;
 }

@@ -336,13 +336,14 @@ function estimateTokens(text) {
     return Math.ceil(text.length / 4); // Rough estimate: 1 token ≈ 4 characters
 }
 
-// ✅ ENHANCED: AI Response with Smart Memory Management
+// ✅ UPDATED: OpenAI Integration with Smart Memory Management
 async function getAIResponseWithSmartMemory(message, isSpecialUser, personality, userId) {
     try {
-        const { GoogleGenerativeAI } = require("@google/generative-ai");
+        const OpenAI = require('openai');
 
-        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const openai = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY
+        });
 
         // Get or create conversation history for this user
         let userHistory = conversationHistory.get(userId) || [];
@@ -371,18 +372,11 @@ async function getAIResponseWithSmartMemory(message, isSpecialUser, personality,
             }
         }
 
-        // Build conversation context
-        let conversationContext = '';
-        if (selectedContext.length > 0) {
-            conversationContext = '\n\nRecent conversation:\n';
-            selectedContext.forEach((msg) => {
-                conversationContext += `${msg.role === 'user' ? 'User' : 'You'}: ${msg.content}\n`;
-            });
-            conversationContext += '\nContinue this conversation naturally and refer to previous messages when relevant.\n';
-        }
-
-        // Build system prompt with conversation context
-        const systemPrompt = `You are a helpful AI assistant in a Discord server. You must ALWAYS respond in English only.
+        // Build messages for OpenAI format
+        let messages = [
+            {
+                role: "system",
+                content: `You are a helpful AI assistant in a Discord server. You must ALWAYS respond in English only.
 
 Personality: ${personality}
 User type: ${isSpecialUser ? 'VIP user - be respectful, polite, and professional' : 'Regular user - be frank, casual, and feel free to crack appropriate jokes'}
@@ -394,19 +388,26 @@ Guidelines:
 - Always respond in English regardless of input language
 - Remember the conversation context and refer to previous messages naturally
 - Avoid controversial topics
-- Build on the conversation history to create engaging dialogue
+- Build on the conversation history to create engaging dialogue`
+            }
+        ];
 
-${conversationContext}
+        // Add conversation history
+        messages = messages.concat(selectedContext);
+        messages.push({ role: 'user', content: message });
 
-Current user message: ${message}`;
+        // Call OpenAI API
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini", // Fast and affordable!
+            messages: messages,
+            max_tokens: 500,
+            temperature: isSpecialUser ? 0.7 : 0.9
+        });
 
-        // Generate response
-        const result = await model.generateContent(systemPrompt);
-        const response = await result.response;
-        const text = response.text();
+        const aiResponse = response.choices[0].message.content;
 
         // Add AI response to conversation history
-        userHistory.push({ role: 'assistant', content: text });
+        userHistory.push({ role: 'assistant', content: aiResponse });
 
         // Update conversation history
         conversationHistory.set(userId, userHistory);
@@ -416,17 +417,19 @@ Current user message: ${message}`;
             cleanUpOldConversations();
         }
 
-        return text.length > 1900 ? text.substring(0, 1900) + "..." : text;
+        return aiResponse.length > 1900 ? aiResponse.substring(0, 1900) + "..." : aiResponse;
 
     } catch (error) {
-        console.error('Google AI Error:', error);
+        console.error('OpenAI Error:', error);
 
-        if (error.message?.includes('API_KEY') || error.message?.includes('403')) {
-            return "🔑 My AI brain needs proper credentials. Please check the Google AI API key configuration.";
-        } else if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429')) {
-            return "🚦 I'm thinking too fast! Please try again in a moment.";
-        } else if (error.message?.includes('SAFETY')) {
-            return "🛡️ I can't respond to that type of message. Let's talk about something else!";
+        if (error.code === 'invalid_api_key') {
+            return "🔑 Invalid OpenAI API key. Please check your credentials.";
+        } else if (error.code === 'rate_limit_exceeded') {
+            return "🚦 Rate limit exceeded. Please try again in a moment.";
+        } else if (error.code === 'insufficient_quota') {
+            return "💳 OpenAI quota exceeded. Please check your billing.";
+        } else if (error.message?.includes('API_KEY')) {
+            return "🔑 My AI brain needs proper credentials. Please check the OpenAI API key configuration.";
         } else {
             return "🤖 Something went wrong with my AI processing. Please try again later!";
         }

@@ -8,15 +8,14 @@ const MAX_MESSAGES_PER_USER = 150;
 const CONTEXT_MESSAGES = 50;
 const CLEANUP_THRESHOLD = 200;
 
-// ✅ NEW: Rate limiting and debouncing
+// ✅ NEW: In-memory conversation storage with smart management
 const conversationHistory = new Map();
-const messageProcessingLock = new Set(); // Prevent duplicate processing
 const userCooldowns = new Map(); // User-specific cooldowns
 
-// ✅ NEW: Topic Transitions & Games (same as before)
+// ✅ NEW: Topic Transitions & Games
 const topicTransitions = [
     "Speaking of that, it reminds me of",
-    "That's interesting! On a related note", 
+    "That's interesting! On a related note",
     "I love how that connects to",
     "You know what else is fascinating?",
     "By the way, that reminds me of"
@@ -29,7 +28,7 @@ const conversationGames = {
         items: ['pizza', 'smartphone', 'rainbow', 'ocean', 'guitar', 'butterfly', 'mountain', 'book']
     },
     'storytelling': {
-        name: 'Story Building', 
+        name: 'Story Building',
         intro: '📚 Let\'s create a story together! I\'ll start with a sentence, then you add the next one...',
         starters: [
             'In a world where colors had sounds, Maria discovered she could hear',
@@ -139,19 +138,36 @@ module.exports = {
                     ))
     ],
 
+    // ✅ ONLY SLASH COMMANDS - No message handler
     async execute(interaction, client) {
         const { commandName } = interaction;
 
         try {
             switch (commandName) {
-                case 'ai-toggle': await handleToggle(interaction, client); break;
-                case 'ai-channel': await handleChannel(interaction, client); break;
-                case 'ai-symbol': await handleSymbol(interaction, client); break;
-                case 'ai-status': await handleStatus(interaction, client); break;
-                case 'ai-reset': await handleReset(interaction, client); break;
-                case 'ai-personality': await handlePersonality(interaction, client); break;
-                case 'ai-clear': await handleClear(interaction, client); break;
-                case 'ai-game': await handleGame(interaction, client); break;
+                case 'ai-toggle':
+                    await handleToggle(interaction, client);
+                    break;
+                case 'ai-channel':
+                    await handleChannel(interaction, client);
+                    break;
+                case 'ai-symbol':
+                    await handleSymbol(interaction, client);
+                    break;
+                case 'ai-status':
+                    await handleStatus(interaction, client);
+                    break;
+                case 'ai-reset':
+                    await handleReset(interaction, client);
+                    break;
+                case 'ai-personality':
+                    await handlePersonality(interaction, client);
+                    break;
+                case 'ai-clear':
+                    await handleClear(interaction, client);
+                    break;
+                case 'ai-game':
+                    await handleGame(interaction, client);
+                    break;
             }
         } catch (error) {
             console.error('AI Command Error:', error);
@@ -167,98 +183,12 @@ module.exports = {
                 await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
         }
-    },
-
-    // ✅ FIXED: Message handler with rate limiting and duplicate prevention
-    async handleMessage(message, client) {
-        if (message.author.bot) return;
-
-        const guildId = message.guild?.id;
-        if (!guildId) return;
-
-        // ✅ NEW: Prevent duplicate processing of same message
-        const messageKey = `${message.id}_${message.author.id}`;
-        if (messageProcessingLock.has(messageKey)) {
-            console.log('Message already being processed, skipping');
-            return;
-        }
-
-        try {
-            // ✅ NEW: Add message to processing lock
-            messageProcessingLock.add(messageKey);
-
-            const settings = await getAISettings(client, guildId);
-
-            if (!settings.enabled) return;
-            if (settings.channelId && message.channel.id !== settings.channelId) return;
-            if (!message.content.startsWith(settings.triggerSymbol)) return;
-
-            const userMessage = message.content.slice(settings.triggerSymbol.length).trim();
-            if (!userMessage) return;
-
-            // ✅ NEW: User-specific rate limiting (3 seconds cooldown)
-            const userId = message.author.id;
-            const now = Date.now();
-            const lastRequest = userCooldowns.get(userId) || 0;
-
-            if (now - lastRequest < 3000) { // 3 second cooldown per user
-                await message.react('⏰');
-                return;
-            }
-
-            userCooldowns.set(userId, now);
-
-            await message.channel.sendTyping();
-
-            const isSpecialUser = message.author.id === SPECIAL_USER_ID;
-            const personality = settings.personality || 'casual';
-
-            // ✅ OPTIMIZED: Single API call with all features combined
-            const aiResponse = await getOptimizedAIResponse(
-                userMessage, 
-                isSpecialUser, 
-                personality, 
-                message.author.id,
-                message.channel
-            );
-
-            // ✅ NEW: Add small delay to prevent rapid-fire responses
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            await message.reply(aiResponse);
-
-            // ✅ NEW: Occasionally suggest games (reduced frequency)
-            if (Math.random() < 0.03) { // Reduced from 5% to 3%
-                setTimeout(async () => {
-                    try {
-                        await message.followUp('🎮 *Want to play a conversation game? Try `/ai-game`!*');
-                    } catch (error) {
-                        console.log('Failed to send game suggestion:', error.message);
-                    }
-                }, 2000);
-            }
-
-        } catch (error) {
-            console.error('AI Message Handler Error:', error);
-            try {
-                if (error.message?.includes('rate') || error.message?.includes('429')) {
-                    await message.react('🚦');
-                } else {
-                    await message.reply('Sorry, I encountered an error. Please try again in a moment.');
-                }
-            } catch (replyError) {
-                console.error('Failed to send error message:', replyError);
-            }
-        } finally {
-            // ✅ NEW: Remove from processing lock after delay
-            setTimeout(() => {
-                messageProcessingLock.delete(messageKey);
-            }, 1000);
-        }
     }
+
+    // ✅ REMOVED: handleMessage function (this was causing duplicates)
 };
 
-// ✅ ALL EXISTING HELPER FUNCTIONS (keeping same as before)
+// ✅ ALL EXISTING HELPER FUNCTIONS
 async function handleToggle(interaction, client) {
     const enabled = interaction.options.getBoolean('enabled');
     await client.db.setAISetting(interaction.guildId, 'ai_enabled', enabled ? 1 : 0);
@@ -331,7 +261,7 @@ async function handleStatus(interaction, client) {
             { name: 'Personality', value: settings.personality || 'casual', inline: true },
             { name: 'Your Memory', value: memoryInfo, inline: true },
             { name: 'Active Users', value: `${conversationHistory.size}`, inline: true },
-            { name: '🎭 Enhanced Features', value: '• Optimized mood detection\n• Context-aware responses\n• Rate limiting protection\n• Interactive games', inline: false }
+            { name: '🎭 Enhanced Features', value: '• Advanced mood detection\n• Context-aware responses\n• Natural topic transitions\n• Interactive games', inline: false }
         ])
         .setTimestamp();
 
@@ -359,7 +289,7 @@ async function handlePersonality(interaction, client) {
 
     const personalityDescriptions = {
         friendly: 'Warm and welcoming responses',
-        professional: 'Formal and business-like communication', 
+        professional: 'Formal and business-like communication',
         casual: 'Relaxed and informal conversation',
         funny: 'Humorous and entertaining responses'
     };
@@ -382,10 +312,10 @@ async function handleClear(interaction, client) {
     if (conversationHistory.has(userId)) {
         const historyLength = Math.floor(conversationHistory.get(userId).length / 2);
         conversationHistory.delete(userId);
-        userCooldowns.delete(userId); // Also clear cooldown
+        userCooldowns.delete(userId);
 
         await interaction.reply({ 
-            content: `🧹 Your conversation history and cooldowns have been cleared! (${historyLength} exchanges removed)`, 
+            content: `🧹 Your conversation history has been cleared! (${historyLength} exchanges removed)\nThe AI will start fresh with no memory of our previous conversations.`, 
             ephemeral: true 
         });
     } else {
@@ -434,6 +364,7 @@ async function handleGame(interaction, client) {
     await interaction.reply({ embeds: [embed] });
 }
 
+// ✅ EXPORTED FUNCTIONS for messageCreate.js to use
 async function getAISettings(client, guildId) {
     try {
         const result = client.db.getAISetting(guildId);
@@ -458,11 +389,21 @@ function estimateTokens(text) {
     return Math.ceil(text.length / 4);
 }
 
-// ✅ OPTIMIZED: Single API call combining mood detection + AI response
-async function getOptimizedAIResponse(message, isSpecialUser, personality, userId, channel) {
+// ✅ MAIN AI RESPONSE FUNCTION - Called from messageCreate.js
+async function getAIResponseWithAllFeatures(message, isSpecialUser, personality, userId, channel) {
     try {
         const OpenAI = require('openai');
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+        // Rate limiting per user
+        const now = Date.now();
+        const lastRequest = userCooldowns.get(userId) || 0;
+
+        if (now - lastRequest < 3000) { // 3 second cooldown
+            return "⏰ Please wait a moment before sending another message.";
+        }
+
+        userCooldowns.set(userId, now);
 
         // Get conversation history
         let userHistory = conversationHistory.get(userId) || [];
@@ -487,7 +428,7 @@ async function getOptimizedAIResponse(message, isSpecialUser, personality, userI
             }
         }
 
-        // ✅ Get light channel context (avoid extra API calls)
+        // Get light channel context
         let channelContext = '';
         try {
             const recentMessages = await channel.messages.fetch({ limit: 2 });
@@ -497,7 +438,7 @@ async function getOptimizedAIResponse(message, isSpecialUser, personality, userI
                 .reverse()
                 .join('\n');
         } catch (error) {
-            // If context fetch fails, continue without it
+            // Continue without context if fetch fails
         }
 
         // ✅ COMBINED: Single prompt for mood detection + response + all features
@@ -514,16 +455,14 @@ Guidelines:
 - Always respond in English regardless of input language
 - Remember conversation context and refer to previous messages naturally
 - Use natural conversation flow and smooth transitions
-- Add appropriate emojis based on the detected mood (happy=😊✨, sad=💙🤗, excited=🚀🎉, confused=🤔💭, etc.)
+- Add appropriate emojis based on detected mood (happy=😊✨, sad=💙🤗, excited=🚀🎉, confused=🤔💭, etc.)
 - Avoid controversial topics
 - Build engaging dialogue that encourages continued conversation`;
 
-        // Add channel context if available
         if (channelContext.trim()) {
             systemPrompt += `\n\nRecent channel context:\n${channelContext}`;
         }
 
-        // ✅ Add topic transition possibility
         if (Math.random() < 0.15) {
             const transition = topicTransitions[Math.floor(Math.random() * topicTransitions.length)];
             systemPrompt += `\n\nConsider using this natural transition: "${transition}..." if it fits the conversation flow.`;
@@ -534,7 +473,7 @@ Guidelines:
         messages = messages.concat(selectedContext);
         messages.push({ role: 'user', content: message });
 
-        // ✅ SINGLE API CALL with retry logic
+        // API call with retry logic
         let response;
         let retryCount = 0;
         const maxRetries = 2;
@@ -544,28 +483,27 @@ Guidelines:
                 response = await openai.chat.completions.create({
                     model: "gpt-4o-mini",
                     messages: messages,
-                    max_tokens: 400, // Reduced to prevent long responses
-                    temperature: isSpecialUser ? 0.7 : 0.8 // Slightly reduced creativity
+                    max_tokens: 400,
+                    temperature: isSpecialUser ? 0.7 : 0.8
                 });
-                break; // Success, exit retry loop
+                break;
             } catch (apiError) {
                 retryCount++;
                 if (apiError.code === 'rate_limit_exceeded' && retryCount <= maxRetries) {
-                    console.log(`Rate limit hit, waiting before retry ${retryCount}/${maxRetries}`);
-                    await new Promise(resolve => setTimeout(resolve, 2000 * retryCount)); // Exponential backoff
+                    await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
                 } else {
-                    throw apiError; // Re-throw if not rate limit or max retries exceeded
+                    throw apiError;
                 }
             }
         }
 
         const aiResponse = response.choices[0].message.content;
 
-        // Add AI response to history
+        // Add to history
         userHistory.push({ role: 'assistant', content: aiResponse });
         conversationHistory.set(userId, userHistory);
 
-        // Clean up periodically
+        // Cleanup
         if (conversationHistory.size > CLEANUP_THRESHOLD) {
             cleanUpOldConversations();
         }
@@ -573,12 +511,10 @@ Guidelines:
         return aiResponse.length > 1900 ? aiResponse.substring(0, 1900) + "..." : aiResponse;
 
     } catch (error) {
-        console.error('Optimized AI Error:', error);
+        console.error('AI Error:', error);
 
-        if (error.code === 'invalid_api_key') {
-            return "🔑 Invalid OpenAI API key. Please check your credentials.";
-        } else if (error.code === 'rate_limit_exceeded') {
-            return "🚦 I'm thinking too fast! Please try again in a moment. ⏰";
+        if (error.code === 'rate_limit_exceeded') {
+            return "🚦 I'm thinking too fast! Please try again in a moment.";
         } else if (error.code === 'insufficient_quota') {
             return "💳 OpenAI quota exceeded. Please check your billing.";
         } else {
@@ -605,6 +541,10 @@ function cleanUpOldConversations() {
             userCooldowns.set(userId, time);
         });
 
-        console.log(`🧹 Cleaned up old conversations and cooldowns, kept ${keep.length} recent users`);
+        console.log(`🧹 Cleaned up conversations, kept ${keep.length} recent users`);
     }
 }
+
+// ✅ EXPORT FUNCTIONS for messageCreate.js to use
+module.exports.getAISettings = getAISettings;
+module.exports.getAIResponseWithAllFeatures = getAIResponseWithAllFeatures;

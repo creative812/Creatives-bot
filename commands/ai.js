@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // Hardcoded special user ID
 const SPECIAL_USER_ID = '1165238276735639572';
@@ -10,6 +10,66 @@ const CLEANUP_THRESHOLD = 200; // Clean up when we have this many users
 
 // ✅ NEW: In-memory conversation storage with smart management
 const conversationHistory = new Map();
+
+// ✅ NEW: Topic Transitions for natural conversation flow
+const topicTransitions = [
+    "Speaking of that, it reminds me of",
+    "That's interesting! On a related note",
+    "I love how that connects to",
+    "You know what else is fascinating?",
+    "By the way, that reminds me of",
+    "Oh, and another thing about this topic",
+    "That actually brings up an interesting point about"
+];
+
+// ✅ NEW: Interactive Conversation Games
+const conversationGames = {
+    '20questions': {
+        name: '20 Questions',
+        intro: '🎯 I\'m thinking of something! Ask me yes/no questions to guess what it is!',
+        items: ['pizza', 'smartphone', 'rainbow', 'ocean', 'guitar', 'butterfly', 'mountain', 'book']
+    },
+    'storytelling': {
+        name: 'Story Building',
+        intro: '📚 Let\'s create a story together! I\'ll start with a sentence, then you add the next one...',
+        starters: [
+            'In a world where colors had sounds, Maria discovered she could hear',
+            'The old lighthouse keeper noticed something strange washing up on shore',
+            'When the last library on Earth closed, the books began to'
+        ]
+    },
+    'wouldyourather': {
+        name: 'Would You Rather',
+        intro: '🤔 Here\'s a tough choice for you...',
+        questions: [
+            'Would you rather have the ability to fly or be invisible?',
+            'Would you rather always know when someone is lying or always get away with lying?',
+            'Would you rather have perfect memory or perfect intuition?',
+            'Would you rather be able to speak every language or play every instrument?'
+        ]
+    },
+    'riddles': {
+        name: 'Riddle Time',
+        intro: '🧩 Here\'s a riddle for you to solve...',
+        riddles: [
+            { question: 'I speak without a mouth and hear without ears. What am I?', answer: 'echo' },
+            { question: 'The more you take away from me, the bigger I become. What am I?', answer: 'hole' },
+            { question: 'I\'m tall when I\'m young, short when I\'m old. What am I?', answer: 'candle' }
+        ]
+    }
+};
+
+// ✅ NEW: Mood-based emoji responses
+const moodEmojis = {
+    'happy': ['😊', '😄', '🎉', '✨', '🌟'],
+    'sad': ['😢', '💙', '🤗', '🌧️', '💔'],
+    'excited': ['🚀', '🎆', '⚡', '🔥', '🎊'],
+    'frustrated': ['😤', '💆‍♀️', '🧘‍♀️', '🫂', '💪'],
+    'confused': ['🤔', '🧐', '💭', '❓', '🔍'],
+    'angry': ['😠', '🌊', '🧘‍♀️', '🍃', '☁️'],
+    'thoughtful': ['🤔', '💭', '🧠', '📚', '🌙'],
+    'neutral': ['😌', '👍', '💫', '🌸', '🎭']
+};
 
 module.exports = {
     data: [
@@ -65,10 +125,25 @@ module.exports = {
                     ))
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
-        // ✅ NEW: Clear conversation memory command
+        // ✅ Clear conversation memory command
         new SlashCommandBuilder()
             .setName('ai-clear')
-            .setDescription('Clear your conversation history with the AI')
+            .setDescription('Clear your conversation history with the AI'),
+
+        // ✅ NEW: Interactive conversation games command
+        new SlashCommandBuilder()
+            .setName('ai-game')
+            .setDescription('Start an interactive conversation game')
+            .addStringOption(option =>
+                option.setName('game')
+                    .setDescription('Choose a conversation game')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: '🎯 20 Questions', value: '20questions' },
+                        { name: '📚 Story Building', value: 'storytelling' },
+                        { name: '🤔 Would You Rather', value: 'wouldyourather' },
+                        { name: '🧩 Riddle Time', value: 'riddles' }
+                    ))
     ],
 
     async execute(interaction, client) {
@@ -97,6 +172,9 @@ module.exports = {
                 case 'ai-clear':
                     await handleClear(interaction, client);
                     break;
+                case 'ai-game':
+                    await handleGame(interaction, client);
+                    break;
             }
         } catch (error) {
             console.error('AI Command Error:', error);
@@ -114,7 +192,7 @@ module.exports = {
         }
     },
 
-    // ✅ ENHANCED: Message handler with smart conversation memory
+    // ✅ ENHANCED: Message handler with advanced conversational features
     async handleMessage(message, client) {
         if (message.author.bot) return;
 
@@ -136,15 +214,32 @@ module.exports = {
             const isSpecialUser = message.author.id === SPECIAL_USER_ID;
             const personality = settings.personality || 'casual';
 
-            // ✅ ENHANCED: Get AI response with smart conversation context
-            const aiResponse = await getAIResponseWithSmartMemory(
+            // ✅ NEW: Dynamic Mood Detection
+            const userMood = await detectUserMood(userMessage);
+
+            // ✅ NEW: Context-Aware Responses (get recent channel context)
+            const channelContext = await getChannelContext(message.channel);
+
+            // ✅ ENHANCED: Get AI response with all new features
+            const aiResponse = await getAIResponseWithAllFeatures(
                 userMessage, 
                 isSpecialUser, 
                 personality, 
-                message.author.id
+                message.author.id,
+                userMood,
+                channelContext
             );
 
-            await message.reply(aiResponse);
+            // ✅ NEW: Multi-Modal Responses with mood-appropriate emojis
+            const enhancedResponse = addMultiModalElements(aiResponse, userMood);
+
+            // ✅ NEW: Occasionally suggest interactive games (5% chance)
+            if (Math.random() < 0.05) {
+                const gameInvite = '\n\n🎮 *Feeling chatty? Try `/ai-game` to start a fun conversation game!*';
+                await message.reply(enhancedResponse + gameInvite);
+            } else {
+                await message.reply(enhancedResponse);
+            }
 
         } catch (error) {
             console.error('AI Message Handler Error:', error);
@@ -229,7 +324,7 @@ async function handleStatus(interaction, client) {
 
     const embed = new EmbedBuilder()
         .setColor(statusColor)
-        .setTitle('🤖 AI Chat Status')
+        .setTitle('🤖 AI Chat Status & Features')
         .addFields([
             { name: 'Status', value: statusText, inline: true },
             { name: 'Channel', value: channel, inline: true },
@@ -237,6 +332,7 @@ async function handleStatus(interaction, client) {
             { name: 'Personality', value: settings.personality || 'casual', inline: true },
             { name: 'Your Memory', value: memoryInfo, inline: true },
             { name: 'Total Users', value: `${conversationHistory.size} with history`, inline: true },
+            { name: '🎭 Enhanced Features', value: '• Dynamic mood detection\n• Context-aware responses\n• Topic transitions\n• Interactive games', inline: false },
             { name: 'Usage', value: `Type \`${settings.triggerSymbol}your message\` in ${channel} to chat with AI`, inline: false }
         ])
         .setTimestamp();
@@ -292,7 +388,6 @@ async function handlePersonality(interaction, client) {
     await interaction.reply({ embeds: [embed] });
 }
 
-// ✅ NEW: Clear conversation memory
 async function handleClear(interaction, client) {
     const userId = interaction.user.id;
 
@@ -309,6 +404,50 @@ async function handleClear(interaction, client) {
             ephemeral: true 
         });
     }
+}
+
+// ✅ NEW: Handle interactive conversation games
+async function handleGame(interaction, client) {
+    const gameType = interaction.options.getString('game');
+    const game = conversationGames[gameType];
+
+    if (!game) {
+        return await interaction.reply({ content: 'Game not found!', ephemeral: true });
+    }
+
+    let gameContent = '';
+
+    switch (gameType) {
+        case '20questions':
+            const randomItem = game.items[Math.floor(Math.random() * game.items.length)];
+            // Store the answer in the user's conversation context
+            gameContent = `${game.intro}\n\n*I've chosen something... Ask your first yes/no question!*`;
+            break;
+
+        case 'storytelling':
+            const randomStarter = game.starters[Math.floor(Math.random() * game.starters.length)];
+            gameContent = `${game.intro}\n\n**Story starter:** *${randomStarter}...*\n\nNow you continue the story!`;
+            break;
+
+        case 'wouldyourather':
+            const randomQuestion = game.questions[Math.floor(Math.random() * game.questions.length)];
+            gameContent = `${game.intro}\n\n**${randomQuestion}**\n\nTell me your choice and why!`;
+            break;
+
+        case 'riddles':
+            const randomRiddle = game.riddles[Math.floor(Math.random() * game.riddles.length)];
+            gameContent = `${game.intro}\n\n**${randomRiddle.question}**\n\nThink carefully and give me your answer!`;
+            break;
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor('#9932CC')
+        .setTitle(`🎪 ${game.name} Game Started!`)
+        .setDescription(gameContent)
+        .setFooter({ text: 'Have fun! The AI will play along with your responses.' })
+        .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
 }
 
 async function getAISettings(client, guildId) {
@@ -331,13 +470,77 @@ async function getAISettings(client, guildId) {
     }
 }
 
-// ✅ NEW: Smart token estimation
 function estimateTokens(text) {
-    return Math.ceil(text.length / 4); // Rough estimate: 1 token ≈ 4 characters
+    return Math.ceil(text.length / 4);
 }
 
-// ✅ UPDATED: OpenAI Integration with Smart Memory Management
-async function getAIResponseWithSmartMemory(message, isSpecialUser, personality, userId) {
+// ✅ NEW: Dynamic Mood Detection
+async function detectUserMood(message) {
+    try {
+        const OpenAI = require('openai');
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                {
+                    role: "system",
+                    content: "Analyze the mood/sentiment of this message. Respond with only one word: happy, sad, excited, frustrated, confused, neutral, angry, or thoughtful."
+                },
+                { role: "user", content: message }
+            ],
+            max_tokens: 10,
+            temperature: 0.3
+        });
+
+        return response.choices[0].message.content.toLowerCase().trim();
+    } catch (error) {
+        console.error('Mood detection error:', error);
+        return 'neutral';
+    }
+}
+
+// ✅ NEW: Context-Aware Responses (get recent channel context)
+async function getChannelContext(channel) {
+    try {
+        const recentMessages = await channel.messages.fetch({ limit: 3 });
+        const context = recentMessages
+            .filter(m => !m.author.bot && m.content.length > 0)
+            .map(m => `${m.author.username}: ${m.content.substring(0, 100)}`)
+            .reverse()
+            .join('\n');
+
+        return context || '';
+    } catch (error) {
+        console.error('Context fetch error:', error);
+        return '';
+    }
+}
+
+// ✅ NEW: Multi-Modal Responses with mood-appropriate elements
+function addMultiModalElements(response, mood) {
+    const emojis = moodEmojis[mood] || moodEmojis['neutral'];
+    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+    // Add mood-appropriate emoji with 70% chance
+    if (Math.random() < 0.7) {
+        return `${response} ${randomEmoji}`;
+    }
+
+    return response;
+}
+
+// ✅ NEW: Topic Transitions for natural conversation flow
+function addTopicTransition() {
+    if (Math.random() < 0.15) { // 15% chance to add transition
+        const transition = topicTransitions[Math.floor(Math.random() * topicTransitions.length)];
+        return `\n\n${transition}... `;
+    }
+    return '';
+}
+
+// ✅ ENHANCED: AI Response with All New Features
+async function getAIResponseWithAllFeatures(message, isSpecialUser, personality, userId, userMood, channelContext) {
     try {
         const OpenAI = require('openai');
 
@@ -351,54 +554,66 @@ async function getAIResponseWithSmartMemory(message, isSpecialUser, personality,
         // Add current user message to history
         userHistory.push({ role: 'user', content: message });
 
-        // Keep maximum messages per user (150 * 2 = 300 total including AI responses)
+        // Keep maximum messages per user
         if (userHistory.length > MAX_MESSAGES_PER_USER * 2) {
             userHistory = userHistory.slice(-MAX_MESSAGES_PER_USER * 2);
         }
 
-        // ✅ SMART: Select recent messages that fit within token limit
-        let contextMessages = userHistory.slice(0, -1); // All except current message
+        // Smart context selection
+        let contextMessages = userHistory.slice(0, -1);
         let totalTokens = 0;
         let selectedContext = [];
 
-        // Start from most recent and work backwards
         for (let i = contextMessages.length - 1; i >= 0; i--) {
             const msgTokens = estimateTokens(contextMessages[i].content);
-            if (totalTokens + msgTokens < 3000) { // Leave room for system prompt + response
+            if (totalTokens + msgTokens < 2500) {
                 selectedContext.unshift(contextMessages[i]);
                 totalTokens += msgTokens;
             } else {
-                break; // Stop if we'd exceed token limit
+                break;
             }
         }
 
-        // Build messages for OpenAI format
-        let messages = [
-            {
-                role: "system",
-                content: `You are a helpful AI assistant in a Discord server. You must ALWAYS respond in English only.
+        // ✅ ENHANCED: System prompt with mood awareness and context
+        let systemPrompt = `You are a helpful AI assistant in a Discord server. You must ALWAYS respond in English only.
 
 Personality: ${personality}
 User type: ${isSpecialUser ? 'VIP user - be respectful, polite, and professional' : 'Regular user - be frank, casual, and feel free to crack appropriate jokes'}
+User's current mood: ${userMood}
 
 Guidelines:
-- Keep responses concise (under 1500 characters)
+- Keep responses concise (under 1400 characters)
 - Be helpful and informative
 - ${isSpecialUser ? 'Be respectful, polite, and professional' : 'Be frank, casual, and add humor when appropriate'}
+- Respond to the user's ${userMood} mood appropriately
 - Always respond in English regardless of input language
 - Remember the conversation context and refer to previous messages naturally
+- Use natural conversation flow and transitions
 - Avoid controversial topics
-- Build on the conversation history to create engaging dialogue`
-            }
+- Build engaging dialogue that encourages continued conversation`;
+
+        // Add channel context if available
+        if (channelContext.trim()) {
+            systemPrompt += `\n\nRecent channel context:\n${channelContext}`;
+        }
+
+        // ✅ NEW: Add topic transition possibility
+        const topicTransition = addTopicTransition();
+        if (topicTransition) {
+            systemPrompt += `\n\nConsider using this natural transition: "${topicTransition.trim()}" if appropriate for continuing the conversation.`;
+        }
+
+        // Build messages for OpenAI
+        let messages = [
+            { role: "system", content: systemPrompt }
         ];
 
-        // Add conversation history
         messages = messages.concat(selectedContext);
         messages.push({ role: 'user', content: message });
 
         // Call OpenAI API
         const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini", // Fast and affordable!
+            model: "gpt-4o-mini",
             messages: messages,
             max_tokens: 500,
             temperature: isSpecialUser ? 0.7 : 0.9
@@ -436,11 +651,9 @@ Guidelines:
     }
 }
 
-// ✅ ENHANCED: Better memory cleanup
 function cleanUpOldConversations() {
     const entries = Array.from(conversationHistory.entries());
 
-    // Keep only the 100 most recent conversations
     if (entries.length > 100) {
         const keep = entries.slice(-100);
         conversationHistory.clear();

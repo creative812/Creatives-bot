@@ -1,28 +1,27 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 
 // Hardcoded special user ID
 const SPECIAL_USER_ID = '1165238276735639572';
 
 // ✅ ENHANCED: Smart conversation memory settings
-const MAX_MESSAGES_PER_USER = 150; // Maximum messages to store per user
-const CONTEXT_MESSAGES = 50; // Messages to send to AI (recent ones)
-const CLEANUP_THRESHOLD = 200; // Clean up when we have this many users
+const MAX_MESSAGES_PER_USER = 150;
+const CONTEXT_MESSAGES = 50;
+const CLEANUP_THRESHOLD = 200;
 
-// ✅ NEW: In-memory conversation storage with smart management
+// ✅ NEW: Rate limiting and debouncing
 const conversationHistory = new Map();
+const messageProcessingLock = new Set(); // Prevent duplicate processing
+const userCooldowns = new Map(); // User-specific cooldowns
 
-// ✅ NEW: Topic Transitions for natural conversation flow
+// ✅ NEW: Topic Transitions & Games (same as before)
 const topicTransitions = [
     "Speaking of that, it reminds me of",
-    "That's interesting! On a related note",
+    "That's interesting! On a related note", 
     "I love how that connects to",
     "You know what else is fascinating?",
-    "By the way, that reminds me of",
-    "Oh, and another thing about this topic",
-    "That actually brings up an interesting point about"
+    "By the way, that reminds me of"
 ];
 
-// ✅ NEW: Interactive Conversation Games
 const conversationGames = {
     '20questions': {
         name: '20 Questions',
@@ -30,7 +29,7 @@ const conversationGames = {
         items: ['pizza', 'smartphone', 'rainbow', 'ocean', 'guitar', 'butterfly', 'mountain', 'book']
     },
     'storytelling': {
-        name: 'Story Building',
+        name: 'Story Building', 
         intro: '📚 Let\'s create a story together! I\'ll start with a sentence, then you add the next one...',
         starters: [
             'In a world where colors had sounds, Maria discovered she could hear',
@@ -44,8 +43,7 @@ const conversationGames = {
         questions: [
             'Would you rather have the ability to fly or be invisible?',
             'Would you rather always know when someone is lying or always get away with lying?',
-            'Would you rather have perfect memory or perfect intuition?',
-            'Would you rather be able to speak every language or play every instrument?'
+            'Would you rather have perfect memory or perfect intuition?'
         ]
     },
     'riddles': {
@@ -59,16 +57,13 @@ const conversationGames = {
     }
 };
 
-// ✅ NEW: Mood-based emoji responses
 const moodEmojis = {
     'happy': ['😊', '😄', '🎉', '✨', '🌟'],
-    'sad': ['😢', '💙', '🤗', '🌧️', '💔'],
+    'sad': ['😢', '💙', '🤗', '🌧️'],
     'excited': ['🚀', '🎆', '⚡', '🔥', '🎊'],
-    'frustrated': ['😤', '💆‍♀️', '🧘‍♀️', '🫂', '💪'],
-    'confused': ['🤔', '🧐', '💭', '❓', '🔍'],
-    'angry': ['😠', '🌊', '🧘‍♀️', '🍃', '☁️'],
-    'thoughtful': ['🤔', '💭', '🧠', '📚', '🌙'],
-    'neutral': ['😌', '👍', '💫', '🌸', '🎭']
+    'frustrated': ['😤', '💆‍♀️', '🧘‍♀️', '🫂'],
+    'confused': ['🤔', '🧐', '💭', '❓'],
+    'neutral': ['😌', '👍', '💫', '🌸']
 };
 
 module.exports = {
@@ -125,12 +120,10 @@ module.exports = {
                     ))
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
-        // ✅ Clear conversation memory command
         new SlashCommandBuilder()
             .setName('ai-clear')
             .setDescription('Clear your conversation history with the AI'),
 
-        // ✅ NEW: Interactive conversation games command
         new SlashCommandBuilder()
             .setName('ai-game')
             .setDescription('Start an interactive conversation game')
@@ -147,34 +140,18 @@ module.exports = {
     ],
 
     async execute(interaction, client) {
-        const { commandName, guildId, user } = interaction;
+        const { commandName } = interaction;
 
         try {
             switch (commandName) {
-                case 'ai-toggle':
-                    await handleToggle(interaction, client);
-                    break;
-                case 'ai-channel':
-                    await handleChannel(interaction, client);
-                    break;
-                case 'ai-symbol':
-                    await handleSymbol(interaction, client);
-                    break;
-                case 'ai-status':
-                    await handleStatus(interaction, client);
-                    break;
-                case 'ai-reset':
-                    await handleReset(interaction, client);
-                    break;
-                case 'ai-personality':
-                    await handlePersonality(interaction, client);
-                    break;
-                case 'ai-clear':
-                    await handleClear(interaction, client);
-                    break;
-                case 'ai-game':
-                    await handleGame(interaction, client);
-                    break;
+                case 'ai-toggle': await handleToggle(interaction, client); break;
+                case 'ai-channel': await handleChannel(interaction, client); break;
+                case 'ai-symbol': await handleSymbol(interaction, client); break;
+                case 'ai-status': await handleStatus(interaction, client); break;
+                case 'ai-reset': await handleReset(interaction, client); break;
+                case 'ai-personality': await handlePersonality(interaction, client); break;
+                case 'ai-clear': await handleClear(interaction, client); break;
+                case 'ai-game': await handleGame(interaction, client); break;
             }
         } catch (error) {
             console.error('AI Command Error:', error);
@@ -192,14 +169,24 @@ module.exports = {
         }
     },
 
-    // ✅ ENHANCED: Message handler with advanced conversational features
+    // ✅ FIXED: Message handler with rate limiting and duplicate prevention
     async handleMessage(message, client) {
         if (message.author.bot) return;
 
         const guildId = message.guild?.id;
         if (!guildId) return;
 
+        // ✅ NEW: Prevent duplicate processing of same message
+        const messageKey = `${message.id}_${message.author.id}`;
+        if (messageProcessingLock.has(messageKey)) {
+            console.log('Message already being processed, skipping');
+            return;
+        }
+
         try {
+            // ✅ NEW: Add message to processing lock
+            messageProcessingLock.add(messageKey);
+
             const settings = await getAISettings(client, guildId);
 
             if (!settings.enabled) return;
@@ -209,55 +196,72 @@ module.exports = {
             const userMessage = message.content.slice(settings.triggerSymbol.length).trim();
             if (!userMessage) return;
 
+            // ✅ NEW: User-specific rate limiting (3 seconds cooldown)
+            const userId = message.author.id;
+            const now = Date.now();
+            const lastRequest = userCooldowns.get(userId) || 0;
+
+            if (now - lastRequest < 3000) { // 3 second cooldown per user
+                await message.react('⏰');
+                return;
+            }
+
+            userCooldowns.set(userId, now);
+
             await message.channel.sendTyping();
 
             const isSpecialUser = message.author.id === SPECIAL_USER_ID;
             const personality = settings.personality || 'casual';
 
-            // ✅ NEW: Dynamic Mood Detection
-            const userMood = await detectUserMood(userMessage);
-
-            // ✅ NEW: Context-Aware Responses (get recent channel context)
-            const channelContext = await getChannelContext(message.channel);
-
-            // ✅ ENHANCED: Get AI response with all new features
-            const aiResponse = await getAIResponseWithAllFeatures(
+            // ✅ OPTIMIZED: Single API call with all features combined
+            const aiResponse = await getOptimizedAIResponse(
                 userMessage, 
                 isSpecialUser, 
                 personality, 
                 message.author.id,
-                userMood,
-                channelContext
+                message.channel
             );
 
-            // ✅ NEW: Multi-Modal Responses with mood-appropriate emojis
-            const enhancedResponse = addMultiModalElements(aiResponse, userMood);
+            // ✅ NEW: Add small delay to prevent rapid-fire responses
+            await new Promise(resolve => setTimeout(resolve, 500));
 
-            // ✅ NEW: Occasionally suggest interactive games (5% chance)
-            if (Math.random() < 0.05) {
-                const gameInvite = '\n\n🎮 *Feeling chatty? Try `/ai-game` to start a fun conversation game!*';
-                await message.reply(enhancedResponse + gameInvite);
-            } else {
-                await message.reply(enhancedResponse);
+            await message.reply(aiResponse);
+
+            // ✅ NEW: Occasionally suggest games (reduced frequency)
+            if (Math.random() < 0.03) { // Reduced from 5% to 3%
+                setTimeout(async () => {
+                    try {
+                        await message.followUp('🎮 *Want to play a conversation game? Try `/ai-game`!*');
+                    } catch (error) {
+                        console.log('Failed to send game suggestion:', error.message);
+                    }
+                }, 2000);
             }
 
         } catch (error) {
             console.error('AI Message Handler Error:', error);
             try {
-                await message.reply('Sorry, I encountered an error while processing your message. Please try again later.');
+                if (error.message?.includes('rate') || error.message?.includes('429')) {
+                    await message.react('🚦');
+                } else {
+                    await message.reply('Sorry, I encountered an error. Please try again in a moment.');
+                }
             } catch (replyError) {
                 console.error('Failed to send error message:', replyError);
             }
+        } finally {
+            // ✅ NEW: Remove from processing lock after delay
+            setTimeout(() => {
+                messageProcessingLock.delete(messageKey);
+            }, 1000);
         }
     }
 };
 
-// ✅ ALL EXISTING HELPER FUNCTIONS (preserved exactly)
+// ✅ ALL EXISTING HELPER FUNCTIONS (keeping same as before)
 async function handleToggle(interaction, client) {
     const enabled = interaction.options.getBoolean('enabled');
-    const guildId = interaction.guildId;
-
-    await client.db.setAISetting(guildId, 'ai_enabled', enabled ? 1 : 0);
+    await client.db.setAISetting(interaction.guildId, 'ai_enabled', enabled ? 1 : 0);
 
     const embed = new EmbedBuilder()
         .setColor(enabled ? '#00FF00' : '#FF9900')
@@ -270,7 +274,6 @@ async function handleToggle(interaction, client) {
 
 async function handleChannel(interaction, client) {
     const channel = interaction.options.getChannel('channel');
-    const guildId = interaction.guildId;
 
     if (!channel.isTextBased()) {
         const embed = new EmbedBuilder()
@@ -281,7 +284,7 @@ async function handleChannel(interaction, client) {
         return await interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    await client.db.setAISetting(guildId, 'ai_channel_id', channel.id);
+    await client.db.setAISetting(interaction.guildId, 'ai_channel_id', channel.id);
 
     const embed = new EmbedBuilder()
         .setColor('#00FF00')
@@ -294,9 +297,7 @@ async function handleChannel(interaction, client) {
 
 async function handleSymbol(interaction, client) {
     const symbol = interaction.options.getString('symbol');
-    const guildId = interaction.guildId;
-
-    await client.db.setAISetting(guildId, 'ai_trigger_symbol', symbol);
+    await client.db.setAISetting(interaction.guildId, 'ai_trigger_symbol', symbol);
 
     const embed = new EmbedBuilder()
         .setColor('#00FF00')
@@ -311,14 +312,12 @@ async function handleSymbol(interaction, client) {
 }
 
 async function handleStatus(interaction, client) {
-    const guildId = interaction.guildId;
-    const settings = await getAISettings(client, guildId);
+    const settings = await getAISettings(client, interaction.guildId);
 
     const channel = settings.channelId ? `<#${settings.channelId}>` : 'Any channel';
     const statusColor = settings.enabled ? '#00FF00' : '#FF0000';
     const statusText = settings.enabled ? '✅ Enabled' : '❌ Disabled';
 
-    // Get memory stats for this user
     const userHistory = conversationHistory.get(interaction.user.id);
     const memoryInfo = userHistory ? `${Math.floor(userHistory.length / 2)} exchanges` : 'No history';
 
@@ -331,9 +330,8 @@ async function handleStatus(interaction, client) {
             { name: 'Trigger Symbol', value: `\`${settings.triggerSymbol}\``, inline: true },
             { name: 'Personality', value: settings.personality || 'casual', inline: true },
             { name: 'Your Memory', value: memoryInfo, inline: true },
-            { name: 'Total Users', value: `${conversationHistory.size} with history`, inline: true },
-            { name: '🎭 Enhanced Features', value: '• Dynamic mood detection\n• Context-aware responses\n• Topic transitions\n• Interactive games', inline: false },
-            { name: 'Usage', value: `Type \`${settings.triggerSymbol}your message\` in ${channel} to chat with AI`, inline: false }
+            { name: 'Active Users', value: `${conversationHistory.size}`, inline: true },
+            { name: '🎭 Enhanced Features', value: '• Optimized mood detection\n• Context-aware responses\n• Rate limiting protection\n• Interactive games', inline: false }
         ])
         .setTimestamp();
 
@@ -341,23 +339,15 @@ async function handleStatus(interaction, client) {
 }
 
 async function handleReset(interaction, client) {
-    const guildId = interaction.guildId;
-
-    await client.db.setAISetting(guildId, 'ai_enabled', 0);
-    await client.db.setAISetting(guildId, 'ai_channel_id', null);
-    await client.db.setAISetting(guildId, 'ai_trigger_symbol', '!');
-    await client.db.setAISetting(guildId, 'ai_personality', 'casual');
+    await client.db.setAISetting(interaction.guildId, 'ai_enabled', 0);
+    await client.db.setAISetting(interaction.guildId, 'ai_channel_id', null);
+    await client.db.setAISetting(interaction.guildId, 'ai_trigger_symbol', '!');
+    await client.db.setAISetting(interaction.guildId, 'ai_personality', 'casual');
 
     const embed = new EmbedBuilder()
         .setColor('#FF9900')
         .setTitle('🤖 AI Settings Reset')
         .setDescription('All AI settings have been reset to default values.')
-        .addFields([
-            { name: 'Status', value: '❌ Disabled', inline: true },
-            { name: 'Channel', value: 'Any channel', inline: true },
-            { name: 'Trigger Symbol', value: '`!`', inline: true },
-            { name: 'Personality', value: 'casual', inline: true }
-        ])
         .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
@@ -365,13 +355,11 @@ async function handleReset(interaction, client) {
 
 async function handlePersonality(interaction, client) {
     const personality = interaction.options.getString('type');
-    const guildId = interaction.guildId;
-
-    await client.db.setAISetting(guildId, 'ai_personality', personality);
+    await client.db.setAISetting(interaction.guildId, 'ai_personality', personality);
 
     const personalityDescriptions = {
         friendly: 'Warm and welcoming responses',
-        professional: 'Formal and business-like communication',
+        professional: 'Formal and business-like communication', 
         casual: 'Relaxed and informal conversation',
         funny: 'Humorous and entertaining responses'
     };
@@ -394,8 +382,10 @@ async function handleClear(interaction, client) {
     if (conversationHistory.has(userId)) {
         const historyLength = Math.floor(conversationHistory.get(userId).length / 2);
         conversationHistory.delete(userId);
+        userCooldowns.delete(userId); // Also clear cooldown
+
         await interaction.reply({ 
-            content: `🧹 Your conversation history has been cleared! (${historyLength} exchanges removed)\nThe AI will start fresh with no memory of our previous conversations.`, 
+            content: `🧹 Your conversation history and cooldowns have been cleared! (${historyLength} exchanges removed)`, 
             ephemeral: true 
         });
     } else {
@@ -406,7 +396,6 @@ async function handleClear(interaction, client) {
     }
 }
 
-// ✅ NEW: Handle interactive conversation games
 async function handleGame(interaction, client) {
     const gameType = interaction.options.getString('game');
     const game = conversationGames[gameType];
@@ -419,24 +408,19 @@ async function handleGame(interaction, client) {
 
     switch (gameType) {
         case '20questions':
-            const randomItem = game.items[Math.floor(Math.random() * game.items.length)];
-            // Store the answer in the user's conversation context
             gameContent = `${game.intro}\n\n*I've chosen something... Ask your first yes/no question!*`;
             break;
-
         case 'storytelling':
             const randomStarter = game.starters[Math.floor(Math.random() * game.starters.length)];
-            gameContent = `${game.intro}\n\n**Story starter:** *${randomStarter}...*\n\nNow you continue the story!`;
+            gameContent = `${game.intro}\n\n**Story starter:** *${randomStarter}...*\n\nNow you continue!`;
             break;
-
         case 'wouldyourather':
             const randomQuestion = game.questions[Math.floor(Math.random() * game.questions.length)];
             gameContent = `${game.intro}\n\n**${randomQuestion}**\n\nTell me your choice and why!`;
             break;
-
         case 'riddles':
             const randomRiddle = game.riddles[Math.floor(Math.random() * game.riddles.length)];
-            gameContent = `${game.intro}\n\n**${randomRiddle.question}**\n\nThink carefully and give me your answer!`;
+            gameContent = `${game.intro}\n\n**${randomRiddle.question}**\n\nThink carefully!`;
             break;
     }
 
@@ -444,7 +428,7 @@ async function handleGame(interaction, client) {
         .setColor('#9932CC')
         .setTitle(`🎪 ${game.name} Game Started!`)
         .setDescription(gameContent)
-        .setFooter({ text: 'Have fun! The AI will play along with your responses.' })
+        .setFooter({ text: 'The AI will play along with your responses!' })
         .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
@@ -474,87 +458,16 @@ function estimateTokens(text) {
     return Math.ceil(text.length / 4);
 }
 
-// ✅ NEW: Dynamic Mood Detection
-async function detectUserMood(message) {
+// ✅ OPTIMIZED: Single API call combining mood detection + AI response
+async function getOptimizedAIResponse(message, isSpecialUser, personality, userId, channel) {
     try {
         const OpenAI = require('openai');
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [
-                {
-                    role: "system",
-                    content: "Analyze the mood/sentiment of this message. Respond with only one word: happy, sad, excited, frustrated, confused, neutral, angry, or thoughtful."
-                },
-                { role: "user", content: message }
-            ],
-            max_tokens: 10,
-            temperature: 0.3
-        });
-
-        return response.choices[0].message.content.toLowerCase().trim();
-    } catch (error) {
-        console.error('Mood detection error:', error);
-        return 'neutral';
-    }
-}
-
-// ✅ NEW: Context-Aware Responses (get recent channel context)
-async function getChannelContext(channel) {
-    try {
-        const recentMessages = await channel.messages.fetch({ limit: 3 });
-        const context = recentMessages
-            .filter(m => !m.author.bot && m.content.length > 0)
-            .map(m => `${m.author.username}: ${m.content.substring(0, 100)}`)
-            .reverse()
-            .join('\n');
-
-        return context || '';
-    } catch (error) {
-        console.error('Context fetch error:', error);
-        return '';
-    }
-}
-
-// ✅ NEW: Multi-Modal Responses with mood-appropriate elements
-function addMultiModalElements(response, mood) {
-    const emojis = moodEmojis[mood] || moodEmojis['neutral'];
-    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-    // Add mood-appropriate emoji with 70% chance
-    if (Math.random() < 0.7) {
-        return `${response} ${randomEmoji}`;
-    }
-
-    return response;
-}
-
-// ✅ NEW: Topic Transitions for natural conversation flow
-function addTopicTransition() {
-    if (Math.random() < 0.15) { // 15% chance to add transition
-        const transition = topicTransitions[Math.floor(Math.random() * topicTransitions.length)];
-        return `\n\n${transition}... `;
-    }
-    return '';
-}
-
-// ✅ ENHANCED: AI Response with All New Features
-async function getAIResponseWithAllFeatures(message, isSpecialUser, personality, userId, userMood, channelContext) {
-    try {
-        const OpenAI = require('openai');
-
-        const openai = new OpenAI({
-            apiKey: process.env.OPENAI_API_KEY
-        });
-
-        // Get or create conversation history for this user
+        // Get conversation history
         let userHistory = conversationHistory.get(userId) || [];
-
-        // Add current user message to history
         userHistory.push({ role: 'user', content: message });
 
-        // Keep maximum messages per user
         if (userHistory.length > MAX_MESSAGES_PER_USER * 2) {
             userHistory = userHistory.slice(-MAX_MESSAGES_PER_USER * 2);
         }
@@ -574,21 +487,34 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
             }
         }
 
-        // ✅ ENHANCED: System prompt with mood awareness and context
+        // ✅ Get light channel context (avoid extra API calls)
+        let channelContext = '';
+        try {
+            const recentMessages = await channel.messages.fetch({ limit: 2 });
+            channelContext = recentMessages
+                .filter(m => !m.author.bot && m.content.length > 0 && m.id !== channel.lastMessageId)
+                .map(m => `${m.author.username}: ${m.content.substring(0, 80)}`)
+                .reverse()
+                .join('\n');
+        } catch (error) {
+            // If context fetch fails, continue without it
+        }
+
+        // ✅ COMBINED: Single prompt for mood detection + response + all features
         let systemPrompt = `You are a helpful AI assistant in a Discord server. You must ALWAYS respond in English only.
 
 Personality: ${personality}
 User type: ${isSpecialUser ? 'VIP user - be respectful, polite, and professional' : 'Regular user - be frank, casual, and feel free to crack appropriate jokes'}
-User's current mood: ${userMood}
 
 Guidelines:
+- Analyze the user's mood from their message and respond appropriately
 - Keep responses concise (under 1400 characters)
 - Be helpful and informative
 - ${isSpecialUser ? 'Be respectful, polite, and professional' : 'Be frank, casual, and add humor when appropriate'}
-- Respond to the user's ${userMood} mood appropriately
 - Always respond in English regardless of input language
-- Remember the conversation context and refer to previous messages naturally
-- Use natural conversation flow and transitions
+- Remember conversation context and refer to previous messages naturally
+- Use natural conversation flow and smooth transitions
+- Add appropriate emojis based on the detected mood (happy=😊✨, sad=💙🤗, excited=🚀🎉, confused=🤔💭, etc.)
 - Avoid controversial topics
 - Build engaging dialogue that encourages continued conversation`;
 
@@ -597,37 +523,49 @@ Guidelines:
             systemPrompt += `\n\nRecent channel context:\n${channelContext}`;
         }
 
-        // ✅ NEW: Add topic transition possibility
-        const topicTransition = addTopicTransition();
-        if (topicTransition) {
-            systemPrompt += `\n\nConsider using this natural transition: "${topicTransition.trim()}" if appropriate for continuing the conversation.`;
+        // ✅ Add topic transition possibility
+        if (Math.random() < 0.15) {
+            const transition = topicTransitions[Math.floor(Math.random() * topicTransitions.length)];
+            systemPrompt += `\n\nConsider using this natural transition: "${transition}..." if it fits the conversation flow.`;
         }
 
-        // Build messages for OpenAI
-        let messages = [
-            { role: "system", content: systemPrompt }
-        ];
-
+        // Build messages
+        let messages = [{ role: "system", content: systemPrompt }];
         messages = messages.concat(selectedContext);
         messages.push({ role: 'user', content: message });
 
-        // Call OpenAI API
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: messages,
-            max_tokens: 500,
-            temperature: isSpecialUser ? 0.7 : 0.9
-        });
+        // ✅ SINGLE API CALL with retry logic
+        let response;
+        let retryCount = 0;
+        const maxRetries = 2;
+
+        while (retryCount <= maxRetries) {
+            try {
+                response = await openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    messages: messages,
+                    max_tokens: 400, // Reduced to prevent long responses
+                    temperature: isSpecialUser ? 0.7 : 0.8 // Slightly reduced creativity
+                });
+                break; // Success, exit retry loop
+            } catch (apiError) {
+                retryCount++;
+                if (apiError.code === 'rate_limit_exceeded' && retryCount <= maxRetries) {
+                    console.log(`Rate limit hit, waiting before retry ${retryCount}/${maxRetries}`);
+                    await new Promise(resolve => setTimeout(resolve, 2000 * retryCount)); // Exponential backoff
+                } else {
+                    throw apiError; // Re-throw if not rate limit or max retries exceeded
+                }
+            }
+        }
 
         const aiResponse = response.choices[0].message.content;
 
-        // Add AI response to conversation history
+        // Add AI response to history
         userHistory.push({ role: 'assistant', content: aiResponse });
-
-        // Update conversation history
         conversationHistory.set(userId, userHistory);
 
-        // Clean up old conversations periodically
+        // Clean up periodically
         if (conversationHistory.size > CLEANUP_THRESHOLD) {
             cleanUpOldConversations();
         }
@@ -635,16 +573,14 @@ Guidelines:
         return aiResponse.length > 1900 ? aiResponse.substring(0, 1900) + "..." : aiResponse;
 
     } catch (error) {
-        console.error('OpenAI Error:', error);
+        console.error('Optimized AI Error:', error);
 
         if (error.code === 'invalid_api_key') {
             return "🔑 Invalid OpenAI API key. Please check your credentials.";
         } else if (error.code === 'rate_limit_exceeded') {
-            return "🚦 Rate limit exceeded. Please try again in a moment.";
+            return "🚦 I'm thinking too fast! Please try again in a moment. ⏰";
         } else if (error.code === 'insufficient_quota') {
             return "💳 OpenAI quota exceeded. Please check your billing.";
-        } else if (error.message?.includes('API_KEY')) {
-            return "🔑 My AI brain needs proper credentials. Please check the OpenAI API key configuration.";
         } else {
             return "🤖 Something went wrong with my AI processing. Please try again later!";
         }
@@ -660,7 +596,15 @@ function cleanUpOldConversations() {
         keep.forEach(([userId, history]) => {
             conversationHistory.set(userId, history);
         });
-        console.log(`🧹 Cleaned up old conversations, kept ${keep.length} recent users`);
-        console.log(`💾 Total messages in memory: ${Array.from(conversationHistory.values()).reduce((total, hist) => total + hist.length, 0)}`);
+
+        // Also clean up cooldowns
+        const activeCooldowns = Array.from(userCooldowns.entries())
+            .filter(([userId]) => conversationHistory.has(userId));
+        userCooldowns.clear();
+        activeCooldowns.forEach(([userId, time]) => {
+            userCooldowns.set(userId, time);
+        });
+
+        console.log(`🧹 Cleaned up old conversations and cooldowns, kept ${keep.length} recent users`);
     }
 }

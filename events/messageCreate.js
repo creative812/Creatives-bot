@@ -5,10 +5,10 @@ const config = require('../config.json');
 // Rate limiting
 const cooldowns = new Map();
 
-// ✅ ADDED: Load AI module
-let aiCommandModule = null;
+// ✅ UPDATED: Load AI module functions
+let aiModule = null;
 try {
-    aiCommandModule = require('../commands/ai.js');
+    aiModule = require('../commands/ai.js');
 } catch (error) {
     console.log('AI module not found');
 }
@@ -19,7 +19,7 @@ module.exports = {
         // Ignore bots and DMs
         if (message.author.bot || !message.guild) return;
 
-        // ✅ ADDED: Handle XP for leveling system
+        // ✅ Handle XP for leveling system
         const xpLockKey = `xp_${message.guild?.id}_${message.author.id}_${message.id}`;
         if (!client.processingLocks.has(xpLockKey)) {
             client.processingLocks.set(xpLockKey, Date.now());
@@ -33,15 +33,48 @@ module.exports = {
             }
         }
 
-        // ✅ ADDED: Handle AI responses
-        if (aiCommandModule && aiCommandModule.handleMessage) {
+        // ✅ FIXED: Handle AI responses properly
+        if (aiModule && aiModule.getAISettings && aiModule.getAIResponseWithAllFeatures) {
             const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
             if (!client.processingLocks.has(aiLockKey)) {
                 client.processingLocks.set(aiLockKey, Date.now());
                 try {
-                    await aiCommandModule.handleMessage(message, client);
+                    // Get AI settings
+                    const aiSettings = await aiModule.getAISettings(client, message.guild.id);
+
+                    // Check if AI should respond to this message
+                    if (aiSettings.enabled && 
+                        message.content.startsWith(aiSettings.triggerSymbol) &&
+                        (!aiSettings.channelId || message.channel.id === aiSettings.channelId)) {
+
+                        const userMessage = message.content.slice(aiSettings.triggerSymbol.length).trim();
+                        if (userMessage) {
+                            console.log(`🤖 AI processing message: "${userMessage}" from ${message.author.username}`);
+
+                            await message.channel.sendTyping();
+
+                            const isSpecialUser = message.author.id === '1165238276735639572';
+                            const personality = aiSettings.personality || 'casual';
+
+                            // ✅ CORRECT: Call the exported function directly
+                            const aiResponse = await aiModule.getAIResponseWithAllFeatures(
+                                userMessage,
+                                isSpecialUser,
+                                personality,
+                                message.author.id,
+                                message.channel
+                            );
+
+                            await message.reply(aiResponse);
+                        }
+                    }
                 } catch (error) {
                     console.error('Error in AI message handler:', error);
+                    try {
+                        await message.reply('Sorry, I encountered an error while processing your message. Please try again later.');
+                    } catch (replyError) {
+                        console.error('Failed to send AI error message:', replyError);
+                    }
                 } finally {
                     client.processingLocks.delete(aiLockKey);
                 }
@@ -104,11 +137,9 @@ module.exports = {
                     return message.reply({ ...options, allowedMentions: { repliedUser: false } });
                 },
                 editReply: async (options) => {
-                    // For prefix commands, we can't edit replies the same way
                     return message.channel.send(options);
                 },
                 deferReply: async () => {
-                    // For prefix commands, we can send a "thinking" message
                     return message.channel.sendTyping();
                 },
                 options: {
@@ -163,57 +194,41 @@ module.exports = {
     }
 };
 
-/**
- * Handle auto-moderation
- * @param {Message} message - Discord message
- * @param {Client} client - Discord client
- * @param {Object} settings - Guild settings
- */
+// ✅ Keep all your existing helper functions exactly the same
 function handleAutoModeration(message, client, settings) {
     const content = message.content.toLowerCase();
     const violations = [];
 
-    // Skip if user has moderator permissions
     if (PermissionManager.isModerator(message.member)) return;
 
-    // Spam detection (repeated characters)
     if (config.automod.spamThreshold && hasSpam(content, config.automod.spamThreshold)) {
         violations.push('spam');
     }
 
-    // Excessive mentions
     if (config.automod.mentionThreshold && message.mentions.users.size > config.automod.mentionThreshold) {
         violations.push('mention spam');
     }
 
-    // Excessive caps
     if (config.automod.capsThreshold && hasExcessiveCaps(content, config.automod.capsThreshold)) {
         violations.push('excessive caps');
     }
 
-    // Suspicious links (not in whitelist)
     if (config.automod.linkWhitelist && hasSuspiciousLinks(content, config.automod.linkWhitelist)) {
         violations.push('suspicious links');
     }
 
-    // Take action if violations found
     if (violations.length > 0) {
-        // Delete message
         message.delete().catch(error => {
             client.logger.warn('Failed to delete message in auto-moderation:', error);
         });
 
-        // Warn user
         const reason = `Auto-moderation: ${violations.join(', ')}`;
         try {
             client.db.addWarning(message.guild.id, message.author.id, client.user.id, reason);
 
-            // Send warning message
             const embed = EmbedManager.createWarningEmbed('Auto-Moderation', 
                 `${message.author}, your message was removed for: ${violations.join(', ')}`);
-
             message.channel.send({ embeds: [embed] }).then(msg => {
-                // Delete warning message after 10 seconds
                 setTimeout(() => msg.delete().catch(() => {}), 10000);
             });
 
@@ -224,41 +239,20 @@ function handleAutoModeration(message, client, settings) {
     }
 }
 
-/**
- * Check if content has spam (repeated characters)
- * @param {string} content - Message content
- * @param {number} threshold - Spam threshold
- * @returns {boolean}
- */
 function hasSpam(content, threshold) {
     return /(.)\1{4,}/.test(content) || content.length > 500;
 }
 
-/**
- * Check if content has excessive caps
- * @param {string} content - Message content
- * @param {number} threshold - Caps percentage threshold
- * @returns {boolean}
- */
 function hasExcessiveCaps(content, threshold) {
     if (content.length < 10) return false;
-
     const uppercaseCount = (content.match(/[A-Z]/g) || []).length;
     const letterCount = (content.match(/[A-Za-z]/g) || []).length;
-
     return letterCount > 0 && (uppercaseCount / letterCount) * 100 > threshold;
 }
 
-/**
- * Check if content has suspicious links
- * @param {string} content - Message content
- * @param {Array} whitelist - Whitelisted domains
- * @returns {boolean}
- */
 function hasSuspiciousLinks(content, whitelist) {
     const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
     const urls = content.match(urlRegex);
-
     if (!urls) return false;
 
     return urls.some(url => {
@@ -266,17 +260,11 @@ function hasSuspiciousLinks(content, whitelist) {
             const domain = new URL(url).hostname.toLowerCase();
             return !whitelist.some(allowed => domain.includes(allowed));
         } catch {
-            return true; // Invalid URL is suspicious
+            return true;
         }
     });
 }
 
-/**
- * Check permissions for prefix commands
- * @param {GuildMember} member - Guild member
- * @param {Array} permissions - Required permissions
- * @returns {boolean}
- */
 function checkPermissions(member, permissions) {
     return permissions.some(perm => {
         switch (perm) {
@@ -293,12 +281,6 @@ function checkPermissions(member, permissions) {
     });
 }
 
-/**
- * Check if user is rate limited
- * @param {string} userId - User ID
- * @param {string} commandName - Command name
- * @returns {boolean}
- */
 function isRateLimited(userId, commandName) {
     const key = `${userId}-${commandName}`;
     const now = Date.now();
@@ -317,15 +299,7 @@ function isRateLimited(userId, commandName) {
     return false;
 }
 
-/**
- * Get argument index for command option
- * @param {Object} command - Command object
- * @param {string} optionName - Option name
- * @returns {number}
- */
 function getArgIndex(command, optionName) {
-    // This is a simplified mapping for prefix commands
-    // In a real implementation, you'd want a more sophisticated argument parser
     const argMappings = {
         user: 0,
         target: 0,
@@ -338,6 +312,5 @@ function getArgIndex(command, optionName) {
         message: 0,
         content: 0
     };
-
     return argMappings[optionName] || 0;
 }

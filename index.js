@@ -3,8 +3,8 @@ console.log('🔍 Main Bot Debug:');
 console.log('Token loaded:', !!process.env.DISCORD_TOKEN);
 console.log('Token length:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.length : 0);
 console.log('Token starts with:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.substring(0, 20) + '...' : 'UNDEFINED');
-
 require('./keep_alive.js');
+
 const { 
     Client, 
     GatewayIntentBits, 
@@ -87,7 +87,6 @@ client.guildSettingsCache = new Map();
 const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
 for (const file of commandFiles) {
     const commandModule = require(`./commands/${file}`);
-
     // Handle both single command exports and command arrays
     if (commandModule.data && Array.isArray(commandModule.data)) {
         // AI.js style - array of commands in data property
@@ -172,16 +171,13 @@ const checkRateLimit = (userId, operation) => {
     const key = `${userId}_${operation}`;
     const now = Date.now();
     const userLimits = client.rateLimits.get(key) || { count: 0, resetTime: now + CONSTANTS.TIMEOUTS.RATE_LIMIT_WINDOW };
-
     if (now > userLimits.resetTime) {
         userLimits.count = 0;
         userLimits.resetTime = now + CONSTANTS.TIMEOUTS.RATE_LIMIT_WINDOW;
     }
-
     if (userLimits.count >= CONSTANTS.LIMITS.TICKET_CREATION_RATE_LIMIT) {
         return false;
     }
-
     userLimits.count++;
     client.rateLimits.set(key, userLimits);
     return true;
@@ -338,7 +334,6 @@ const handleTicketCreation = async (interaction) => {
 
         // Create ticket in database with transaction
         const ticketId = client.db.createTicket(guildId, userId, ticketChannel.id, 'Created via panel', ticketNumber);
-
         if (!ticketId) {
             await ticketChannel.delete('Failed to create ticket in database').catch(console.error);
             return await interaction.editReply({
@@ -457,7 +452,6 @@ const handleTicketClaim = async (interaction) => {
             const allTickets = client.db.getOpenTickets(interaction.guild.id);
             ticket = allTickets.find(t => t.channel_id === channelId);
         }
-
         if (!ticket) {
             const stmt = client.db.db.prepare("SELECT * FROM tickets WHERE channel_id = ?");
             ticket = stmt.get(channelId);
@@ -526,6 +520,7 @@ const handleTicketClaim = async (interaction) => {
     } catch (error) {
         console.error('Error claiming ticket:', error.code, error.message);
         client.logger.error('Error claiming ticket:', { code: error.code, message: error.message, path: 'handleTicketClaim' });
+
         await safeReply(interaction, {
             content: '❌ Failed to claim ticket. Please try again.',
             ephemeral: true
@@ -584,7 +579,6 @@ const processTicketClose = async (interaction) => {
             const allTickets = client.db.getOpenTickets(interaction.guild.id);
             ticket = allTickets.find(t => t.channel_id === channelId);
         }
-
         if (!ticket) {
             const stmt = client.db.db.prepare("SELECT * FROM tickets WHERE channel_id = ?");
             ticket = stmt.get(channelId);
@@ -658,6 +652,7 @@ const processTicketClose = async (interaction) => {
     } catch (error) {
         console.error('Error in close ticket handler:', error.code, error.message);
         client.logger.error('Error closing ticket:', { code: error.code, message: error.message, path: 'processTicketClose' });
+
         await safeReply(interaction, {
             content: '❌ Failed to close ticket. Please try again.',
             ephemeral: true
@@ -669,7 +664,6 @@ const processTicketClose = async (interaction) => {
 // ✅ FIXED: Single interactionCreate handler with improved structure
 client.on('interactionCreate', async interaction => {
     const lockKey = `${interaction.user.id}_${interaction.customId || interaction.commandName}_${Date.now()}`;
-
     if (client.processingLocks.has(lockKey)) {
         return;
     }
@@ -681,7 +675,6 @@ client.on('interactionCreate', async interaction => {
             const command = client.commands.get(interaction.commandName);
             if (command && command.execute) {
                 await command.execute(interaction, client);
-                // ✅ FIXED: Return here to prevent duplicate error handling
                 return;
             } else {
                 await safeReply(interaction, { content: 'Unknown command', ephemeral: true });
@@ -716,7 +709,6 @@ client.on('interactionCreate', async interaction => {
 
                     const guildId = interaction.guild.id;
                     const settings = getCachedGuildSettings(guildId);
-
                     if (settings) {
                         // Store roles as normalized array
                         client.db.setTicketSettings(guildId, {
@@ -725,7 +717,6 @@ client.on('interactionCreate', async interaction => {
                             staffRoleIds: validRoles,
                             nextTicketNumber: settings.next_ticket_number || 1
                         });
-
                         // Update cache
                         client.guildSettingsCache.delete(guildId);
                     }
@@ -761,6 +752,7 @@ client.on('interactionCreate', async interaction => {
                         content: `**Staff Roles Selected:** ${roleList}`,
                         ephemeral: true
                     });
+
                 } catch (error) {
                     console.error('Error handling role selection:', error.code, error.message);
                     client.logger.error('Error handling role selection:', { code: error.code, message: error.message });
@@ -794,12 +786,10 @@ client.on('interactionCreate', async interaction => {
                     break;
             }
         }
-
     } catch (error) {
         console.error('Error in interactionCreate:', error.code, error.message);
         client.logger.error('Error handling interaction:', { code: error.code, message: error.message, path: 'interactionCreate' });
 
-        // ✅ FIXED: Only show error if there was actually an error and we haven't already replied
         if (!interaction.replied && !interaction.deferred) {
             await safeReply(interaction, { 
                 content: '❌ An error occurred!', 
@@ -810,20 +800,6 @@ client.on('interactionCreate', async interaction => {
         client.processingLocks.delete(lockKey);
     }
 });
-
-// ❌ FIXED: Commented out to prevent duplicate event handlers
-/*
-// Load event files - ONLY ONCE
-const eventFiles = fs.readdirSync('./events').filter(file => file.endsWith('.js'));
-for (const file of eventFiles) {
-    const event = require(`./events/${file}`);
-    if (event.once) {
-        client.once(event.name, (...args) => event.execute(...args, client));
-    } else {
-        client.on(event.name, (...args) => event.execute(...args, client));
-    }
-}
-*/
 
 // Scheduled tasks initialization  
 const scheduledTasks = require('./scheduled/tasks.js');
@@ -854,7 +830,7 @@ client.login(token).catch(error => {
     process.exit(1);
 });
 
-// Enhanced leveling message handler
+// ✅ FIXED: Enhanced messageCreate handler with corrected AI integration
 const { handleMessageForXp } = require('./commands/level.js');
 
 client.on('messageCreate', async message => {
@@ -876,14 +852,50 @@ client.on('messageCreate', async message => {
             await handleMessageForXp(message, client);
         }
 
-        // ✅ FIXED: Handle AI responses with correct parameter
-        if (aiCommandModule && aiCommandModule.handleMessage) {
+        // ✅ FIXED: Handle AI responses with corrected function calls
+        if (aiCommandModule && aiCommandModule.getAISettings && aiCommandModule.getAIResponseWithAllFeatures) {
             const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
             if (!client.processingLocks.has(aiLockKey)) {
                 client.processingLocks.set(aiLockKey, Date.now());
                 try {
-                    // ✅ FIXED: Pass client instead of client.db
-                    await aiCommandModule.handleMessage(message, client);
+                    console.log(`📨 Processing message: "${message.content}" from ${message.author.username}`);
+
+                    // Get AI settings
+                    const aiSettings = await aiCommandModule.getAISettings(client, message.guild.id);
+                    console.log('⚙️ AI Settings:', aiSettings);
+
+                    // Check if AI should respond to this message
+                    if (aiSettings.enabled && 
+                        message.content.startsWith(aiSettings.triggerSymbol) &&
+                        (!aiSettings.channelId || message.channel.id === aiSettings.channelId)) {
+
+                        const userMessage = message.content.slice(aiSettings.triggerSymbol.length).trim();
+                        if (userMessage) {
+                            console.log(`🤖 AI processing message: "${userMessage}"`);
+
+                            await message.channel.sendTyping();
+
+                            const isSpecialUser = message.author.id === '1165238276735639572';
+                            const personality = aiSettings.personality || 'casual';
+
+                            // ✅ CORRECT: Call the exported function directly
+                            const aiResponse = await aiCommandModule.getAIResponseWithAllFeatures(
+                                userMessage,
+                                isSpecialUser,
+                                personality,
+                                message.author.id,
+                                message.channel
+                            );
+
+                            console.log('✅ AI response generated, sending reply');
+                            await message.reply(aiResponse);
+                        }
+                    } else {
+                        console.log('❌ AI will not respond because:');
+                        console.log('  - Enabled:', aiSettings.enabled);
+                        console.log('  - Starts with trigger:', message.content.startsWith(aiSettings.triggerSymbol));
+                        console.log('  - Channel match:', !aiSettings.channelId || message.channel.id === aiSettings.channelId);
+                    }
                 } catch (error) {
                     console.error('Error in AI message handler:', error);
                     client.logger.error('Error in AI message handler:', { 
@@ -895,8 +907,9 @@ client.on('messageCreate', async message => {
                     client.processingLocks.delete(aiLockKey);
                 }
             }
+        } else {
+            console.log('❌ AI module not loaded properly');
         }
-
     } catch (error) {
         console.error('Error in messageCreate handler:', error.code, error.message);
         client.logger.error('Error in messageCreate handler:', { code: error.code, message: error.message });

@@ -1,18 +1,21 @@
 const PermissionManager = require('../utils/permissions.js');
 const EmbedManager = require('../utils/embeds.js');
 const config = require('../config.json');
-
 // Rate limiting
 const cooldowns = new Map();
-
-// ✅ REMOVED: AI module loading (no longer needed here)
-
+// ✅ RESTORED: Load AI module functions
+let aiModule = null;
+try {
+    aiModule = require('../commands/ai.js');
+    console.log('✅ AI module loaded in messageCreate.js');
+} catch (error) {
+    console.log('❌ AI module not found:', error.message);
+}
 module.exports = {
     name: 'messageCreate',
     async execute(message, client) {
         // Ignore bots and DMs
         if (message.author.bot || !message.guild) return;
-
         // ✅ Handle XP for leveling system
         const xpLockKey = `xp_${message.guild?.id}_${message.author.id}_${message.id}`;
         if (!client.processingLocks.has(xpLockKey)) {
@@ -26,33 +29,72 @@ module.exports = {
                 client.processingLocks.delete(xpLockKey);
             }
         }
-
-        // ✅ REMOVED: Entire AI message handling section to prevent duplicates
-
+        // ✅ RESTORED: Handle AI responses properly
+        if (aiModule && aiModule.getAISettings && aiModule.getAIResponseWithAllFeatures) {
+            const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
+            if (!client.processingLocks.has(aiLockKey)) {
+                client.processingLocks.set(aiLockKey, Date.now());
+                try {
+                    console.log(`📨 [messageCreate.js] Processing message: "${message.content}" from ${message.author.username}`);
+                    // Get AI settings
+                    const aiSettings = await aiModule.getAISettings(client, message.guild.id);
+                    console.log('⚙️ AI Settings:', aiSettings);
+                    // Check if AI should respond to this message
+                    if (aiSettings.enabled && 
+                        message.content.startsWith(aiSettings.triggerSymbol) &&
+                        (!aiSettings.channelId || message.channel.id === aiSettings.channelId)) {
+                        const userMessage = message.content.slice(aiSettings.triggerSymbol.length).trim();
+                        if (userMessage) {
+                            console.log(`🤖 AI processing message: "${userMessage}" from ${message.author.username}`);
+                            await message.channel.sendTyping();
+                            const isSpecialUser = message.author.id === '1165238276735639572';
+                            const personality = aiSettings.personality || 'casual';
+                            // ✅ CORRECT: Call the exported function directly
+                            const aiResponse = await aiModule.getAIResponseWithAllFeatures(
+                                userMessage,
+                                isSpecialUser,
+                                personality,
+                                message.author.id,
+                                message.channel
+                            );
+                            console.log('✅ AI response generated, sending reply from messageCreate.js');
+                            await message.reply(aiResponse);
+                        }
+                    } else {
+                        console.log('❌ AI will not respond because:');
+                        console.log('  - Enabled:', aiSettings.enabled);
+                        console.log('  - Starts with trigger:', message.content.startsWith(aiSettings.triggerSymbol));
+                        console.log('  - Channel match:', !aiSettings.channelId || message.channel.id === aiSettings.channelId);
+                    }
+                } catch (error) {
+                    console.error('Error in AI message handler:', error);
+                    try {
+                        await message.reply('Sorry, I encountered an error while processing your message. Please try again later.');
+                    } catch (replyError) {
+                        console.error('Failed to send AI error message:', replyError);
+                    }
+                } finally {
+                    client.processingLocks.delete(aiLockKey);
+                }
+            }
+        }
         // Get guild settings
         const guildSettings = client.db.getGuildSettings(message.guild.id);
         const prefix = guildSettings?.prefix || config.prefix;
-
         // Auto-moderation
         if (guildSettings?.automod_enabled && config.automod.enabled) {
             handleAutoModeration(message, client, guildSettings);
         }
-
         // Check if message starts with prefix
         if (!message.content.startsWith(prefix)) return;
-
         // Parse command and arguments
         const args = message.content.slice(prefix.length).trim().split(/ +/);
         const commandName = args.shift()?.toLowerCase();
-
         if (!commandName) return;
-
         // Find command
         const command = client.commands.get(commandName) || 
                        client.commands.find(cmd => cmd.aliases?.includes(commandName));
-
         if (!command) return;
-
         // Check permissions
         if (command.permissions && !checkPermissions(message.member, command.permissions)) {
             return message.reply({ 
@@ -61,7 +103,6 @@ module.exports = {
                 allowedMentions: { repliedUser: false }
             });
         }
-
         // Rate limiting
         if (isRateLimited(message.author.id, commandName)) {
             return message.reply({ 
@@ -70,7 +111,6 @@ module.exports = {
                 allowedMentions: { repliedUser: false }
             });
         }
-
         try {
             // Create interaction-like object for compatibility
             const fakeInteraction = {
@@ -126,10 +166,8 @@ module.exports = {
                     getSubcommand: () => args[0]
                 }
             };
-
             // Execute command
             command.execute(fakeInteraction, client);
-
             // Log command usage
             client.logger.logCommand(commandName, message.author, message.guild);
         } catch (error) {
@@ -141,68 +179,54 @@ module.exports = {
         }
     }
 };
-
 // ✅ Keep all your existing helper functions exactly the same
 function handleAutoModeration(message, client, settings) {
     const content = message.content.toLowerCase();
     const violations = [];
-
     if (PermissionManager.isModerator(message.member)) return;
-
     if (config.automod.spamThreshold && hasSpam(content, config.automod.spamThreshold)) {
         violations.push('spam');
     }
-
     if (config.automod.mentionThreshold && message.mentions.users.size > config.automod.mentionThreshold) {
         violations.push('mention spam');
     }
-
     if (config.automod.capsThreshold && hasExcessiveCaps(content, config.automod.capsThreshold)) {
         violations.push('excessive caps');
     }
-
     if (config.automod.linkWhitelist && hasSuspiciousLinks(content, config.automod.linkWhitelist)) {
         violations.push('suspicious links');
     }
-
     if (violations.length > 0) {
         message.delete().catch(error => {
             client.logger.warn('Failed to delete message in auto-moderation:', error);
         });
-
         const reason = `Auto-moderation: ${violations.join(', ')}`;
         try {
             client.db.addWarning(message.guild.id, message.author.id, client.user.id, reason);
-
             const embed = EmbedManager.createWarningEmbed('Auto-Moderation', 
                 `${message.author}, your message was removed for: ${violations.join(', ')}`);
             message.channel.send({ embeds: [embed] }).then(msg => {
                 setTimeout(() => msg.delete().catch(() => {}), 10000);
             });
-
             client.logger.logModeration('Auto-Moderation', message.author, client.user, message.guild, reason);
         } catch (error) {
             client.logger.error('Error in auto-moderation:', error);
         }
     }
 }
-
 function hasSpam(content, threshold) {
     return /(.)\1{4,}/.test(content) || content.length > 500;
 }
-
 function hasExcessiveCaps(content, threshold) {
     if (content.length < 10) return false;
     const uppercaseCount = (content.match(/[A-Z]/g) || []).length;
     const letterCount = (content.match(/[A-Za-z]/g) || []).length;
     return letterCount > 0 && (uppercaseCount / letterCount) * 100 > threshold;
 }
-
 function hasSuspiciousLinks(content, whitelist) {
     const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
     const urls = content.match(urlRegex);
     if (!urls) return false;
-
     return urls.some(url => {
         try {
             const domain = new URL(url).hostname.toLowerCase();
@@ -212,7 +236,6 @@ function hasSuspiciousLinks(content, whitelist) {
         }
     });
 }
-
 function checkPermissions(member, permissions) {
     return permissions.some(perm => {
         switch (perm) {
@@ -228,25 +251,20 @@ function checkPermissions(member, permissions) {
         }
     });
 }
-
 function isRateLimited(userId, commandName) {
     const key = `${userId}-${commandName}`;
     const now = Date.now();
-
     if (!cooldowns.has(key)) {
         cooldowns.set(key, now);
         return false;
     }
-
     const lastUsed = cooldowns.get(key);
     if (now - lastUsed < config.rateLimitWindow) {
         return true;
     }
-
     cooldowns.set(key, now);
     return false;
 }
-
 function getArgIndex(command, optionName) {
     const argMappings = {
         user: 0,

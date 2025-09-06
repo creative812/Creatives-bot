@@ -1,9 +1,11 @@
 const { ActivityType } = require('discord.js');
 
 module.exports = {
-    name: 'clientready',
+    name: 'clientready',  
     once: true,
     execute(client) {
+        console.log('🟡 [ready.js] Handler fired');
+
         client.logger.success(`Bot logged in as ${client.user.tag}!`);
         client.logger.info(`Ready to serve ${client.guilds.cache.size} server(s) and ${client.users.cache.size} user(s)`);
 
@@ -14,9 +16,8 @@ module.exports = {
             { name: `over ${client.guilds.cache.size} servers`, type: ActivityType.Watching },
             { name: 'Discord moderation', type: ActivityType.Playing }
         ];
-
         let currentActivity = 0;
-        
+
         const updateActivity = () => {
             client.user.setActivity(activities[currentActivity]);
             currentActivity = (currentActivity + 1) % activities.length;
@@ -31,7 +32,7 @@ module.exports = {
         // Log some startup statistics
         client.logger.info(`Commands loaded: ${client.commands.size}`);
         client.logger.info(`Bot latency: ${Math.round(client.ws.ping)}ms`);
-        
+
         // Database cleanup on startup
         try {
             client.db.cleanupOldData();

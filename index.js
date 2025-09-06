@@ -107,6 +107,24 @@ for (const file of commandFiles) {
     }
 }
 
+// ✅ FIXED: Load event files dynamically (replaces duplicate handlers)
+const eventFiles = fs.readdirSync('./events').filter(file => file.endsWith('.js'));
+for (const file of eventFiles) {
+    const event = require(`./events/${file}`);
+    if (event.once) {
+        client.once(event.name, (...args) => event.execute(...args, client));
+    } else {
+        client.on(event.name, (...args) => event.execute(...args, client));
+    }
+    console.log(`✅ Event loaded: ${event.name}`);
+}
+
+// ✅ DEBUG: Show listener counts (should all be 1)
+console.log('📊 Event Listener Counts:');
+console.log('- ready:', client.listenerCount('ready'));
+console.log('- messageCreate:', client.listenerCount('messageCreate'));
+console.log('- interactionCreate:', client.listenerCount('interactionCreate'));
+
 // Store AI command module for message handling
 let aiCommandModule = null;
 try {
@@ -661,145 +679,9 @@ const processTicketClose = async (interaction) => {
     }
 };
 
-// ✅ FIXED: Single interactionCreate handler with improved structure
-client.on('interactionCreate', async interaction => {
-    const lockKey = `${interaction.user.id}_${interaction.customId || interaction.commandName}_${Date.now()}`;
-    if (client.processingLocks.has(lockKey)) {
-        return;
-    }
-
-    try {
-        client.processingLocks.set(lockKey, Date.now());
-
-        if (interaction.isChatInputCommand()) {
-            const command = client.commands.get(interaction.commandName);
-            if (command && command.execute) {
-                await command.execute(interaction, client);
-                return;
-            } else {
-                await safeReply(interaction, { content: 'Unknown command', ephemeral: true });
-                return;
-            }
-        } else if (interaction.isModalSubmit()) {
-            if (interaction.customId === 'close_ticket_modal') {
-                await processTicketClose(interaction);
-            }
-        } else if (interaction.isStringSelectMenu()) {
-            if (interaction.customId === 'ticket_staff_roles') {
-                try {
-                    const selectedRoles = interaction.values;
-                    const storageKey = `${interaction.user.id}_${interaction.guild.id}`;
-                    const panelData = client.tempPanelData?.get(storageKey);
-
-                    if (!panelData || panelData.guildId !== interaction.guild.id || panelData.userId !== interaction.user.id) {
-                        return await safeReply(interaction, {
-                            content: '❌ Session expired or invalid. Please run the command again.',
-                            ephemeral: true
-                        });
-                    }
-
-                    // Validate selected roles exist
-                    const validRoles = validateRoles(interaction.guild, selectedRoles);
-                    if (validRoles.length === 0) {
-                        return await safeReply(interaction, {
-                            content: '❌ No valid roles selected. Please try again.',
-                            ephemeral: true
-                        });
-                    }
-
-                    const guildId = interaction.guild.id;
-                    const settings = getCachedGuildSettings(guildId);
-                    if (settings) {
-                        // Store roles as normalized array
-                        client.db.setTicketSettings(guildId, {
-                            categoryId: settings.category_id,
-                            logChannelId: settings.log_channel_id,
-                            staffRoleIds: validRoles,
-                            nextTicketNumber: settings.next_ticket_number || 1
-                        });
-                        // Update cache
-                        client.guildSettingsCache.delete(guildId);
-                    }
-
-                    const panelEmbed = new EmbedBuilder()
-                        .setTitle(panelData.title)
-                        .setDescription(panelData.description)
-                        .setColor(CONSTANTS.COLORS.INFO)
-                        .setTimestamp();
-
-                    const createButton = new ButtonBuilder()
-                        .setCustomId('create_ticket_button')
-                        .setLabel(panelData.buttonText)
-                        .setStyle(ButtonStyle.Primary)
-                        .setEmoji('🎫');
-
-                    const row = new ActionRowBuilder().addComponents(createButton);
-
-                    await interaction.update({
-                        content: '✅ **Ticket panel created successfully!**',
-                        components: []
-                    });
-
-                    await interaction.followUp({
-                        embeds: [panelEmbed],
-                        components: [row]
-                    });
-
-                    client.tempPanelData.delete(storageKey);
-
-                    const roleList = validRoles.map(roleId => `<@&${roleId}>`).join(', ');
-                    await interaction.followUp({
-                        content: `**Staff Roles Selected:** ${roleList}`,
-                        ephemeral: true
-                    });
-
-                } catch (error) {
-                    console.error('Error handling role selection:', error.code, error.message);
-                    client.logger.error('Error handling role selection:', { code: error.code, message: error.message });
-                    await safeReply(interaction, {
-                        content: '❌ Failed to create ticket panel. Please try again.',
-                        ephemeral: true
-                    });
-                }
-            }
-        } else if (interaction.isButton()) {
-            // Route button interactions to appropriate handlers
-            switch (interaction.customId) {
-                case 'create_ticket_button':
-                    await handleTicketCreation(interaction);
-                    break;
-                case 'claim_ticket_button':
-                    await handleTicketClaim(interaction);
-                    break;
-                case 'close_ticket_button':
-                    await handleTicketClose(interaction);
-                    break;
-                default:
-                    // Handle pagination buttons with debouncing
-                    if (interaction.customId.startsWith('user-profile-')) {
-                        // User profile pagination logic (unchanged but with error improvements)
-                        // ... existing profile pagination code with enhanced error handling
-                    } else if (interaction.customId.startsWith('leaderboard-')) {
-                        // Leaderboard pagination logic (unchanged but with error improvements)
-                        // ... existing leaderboard pagination code with enhanced error handling
-                    }
-                    break;
-            }
-        }
-    } catch (error) {
-        console.error('Error in interactionCreate:', error.code, error.message);
-        client.logger.error('Error handling interaction:', { code: error.code, message: error.message, path: 'interactionCreate' });
-
-        if (!interaction.replied && !interaction.deferred) {
-            await safeReply(interaction, { 
-                content: '❌ An error occurred!', 
-                ephemeral: true 
-            });
-        }
-    } finally {
-        client.processingLocks.delete(lockKey);
-    }
-});
+// ❌ REMOVED: All client.on() event handlers (moved to events/ folder)
+// The interactionCreate handler that was here is now in events/interactionCreate.js
+// The messageCreate handler that was here is now in events/messageCreate.js
 
 // Scheduled tasks initialization  
 const scheduledTasks = require('./scheduled/tasks.js');
@@ -828,94 +710,6 @@ if (!token) {
 client.login(token).catch(error => {
     Logger.error('Failed to login:', { code: error.code, message: error.message });
     process.exit(1);
-});
-
-// ✅ FIXED: Enhanced messageCreate handler with corrected AI integration
-const { handleMessageForXp } = require('./commands/level.js');
-
-client.on('messageCreate', async message => {
-    // Skip bot messages
-    if (message.author.bot) return;
-
-    const xpLockKey = `xp_${message.guild?.id}_${message.author.id}_${message.id}`;
-
-    // Prevent duplicate XP processing
-    if (client.processingLocks.has(xpLockKey)) {
-        return;
-    }
-
-    client.processingLocks.set(xpLockKey, Date.now());
-
-    try {
-        // Handle XP for leveling system
-        if (message.guild) {
-            await handleMessageForXp(message, client);
-        }
-
-        // ✅ FIXED: Handle AI responses with corrected function calls
-        if (aiCommandModule && aiCommandModule.getAISettings && aiCommandModule.getAIResponseWithAllFeatures) {
-            const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
-            if (!client.processingLocks.has(aiLockKey)) {
-                client.processingLocks.set(aiLockKey, Date.now());
-                try {
-                    console.log(`📨 Processing message: "${message.content}" from ${message.author.username}`);
-
-                    // Get AI settings
-                    const aiSettings = await aiCommandModule.getAISettings(client, message.guild.id);
-                    console.log('⚙️ AI Settings:', aiSettings);
-
-                    // Check if AI should respond to this message
-                    if (aiSettings.enabled && 
-                        message.content.startsWith(aiSettings.triggerSymbol) &&
-                        (!aiSettings.channelId || message.channel.id === aiSettings.channelId)) {
-
-                        const userMessage = message.content.slice(aiSettings.triggerSymbol.length).trim();
-                        if (userMessage) {
-                            console.log(`🤖 AI processing message: "${userMessage}"`);
-
-                            await message.channel.sendTyping();
-
-                            const isSpecialUser = message.author.id === '1165238276735639572';
-                            const personality = aiSettings.personality || 'casual';
-
-                            // ✅ CORRECT: Call the exported function directly
-                            const aiResponse = await aiCommandModule.getAIResponseWithAllFeatures(
-                                userMessage,
-                                isSpecialUser,
-                                personality,
-                                message.author.id,
-                                message.channel
-                            );
-
-                            console.log('✅ AI response generated, sending reply');
-                            await message.reply(aiResponse);
-                        }
-                    } else {
-                        console.log('❌ AI will not respond because:');
-                        console.log('  - Enabled:', aiSettings.enabled);
-                        console.log('  - Starts with trigger:', message.content.startsWith(aiSettings.triggerSymbol));
-                        console.log('  - Channel match:', !aiSettings.channelId || message.channel.id === aiSettings.channelId);
-                    }
-                } catch (error) {
-                    console.error('Error in AI message handler:', error);
-                    client.logger.error('Error in AI message handler:', { 
-                        error: error.message, 
-                        guild: message.guild?.id,
-                        user: message.author.id 
-                    });
-                } finally {
-                    client.processingLocks.delete(aiLockKey);
-                }
-            }
-        } else {
-            console.log('❌ AI module not loaded properly');
-        }
-    } catch (error) {
-        console.error('Error in messageCreate handler:', error.code, error.message);
-        client.logger.error('Error in messageCreate handler:', { code: error.code, message: error.message });
-    } finally {
-        client.processingLocks.delete(xpLockKey);
-    }
 });
 
 // Enhanced cleanup with performance improvements

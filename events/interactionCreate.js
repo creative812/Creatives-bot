@@ -1,32 +1,36 @@
 const PermissionManager = require('../utils/permissions.js');
 const EmbedManager = require('../utils/embeds.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField } = require('discord.js');
 
 module.exports = {
     name: 'interactionCreate',
-    execute(interaction, client) {
+    async execute(interaction, client) {
+        console.log('🟢 [interactionCreate.js] Handler fired for:', interaction.customId || interaction.commandName);
+
         // Handle slash commands
-        if (interaction.isCommand()) {
-            handleSlashCommand(interaction, client);
+        if (interaction.isChatInputCommand()) {
+            await handleSlashCommand(interaction, client);
         }
         // Handle button interactions
         else if (interaction.isButton()) {
-            handleButtonInteraction(interaction, client);
+            await handleButtonInteraction(interaction, client);
         }
         // Handle select menu interactions
         else if (interaction.isStringSelectMenu()) {
-            handleSelectMenuInteraction(interaction, client);
+            await handleSelectMenuInteraction(interaction, client);
+        }
+        // Handle modal submissions  
+        else if (interaction.isModalSubmit()) {
+            await handleModalSubmit(interaction, client);
         }
     }
 };
 
 /**
  * Handle slash command interactions
- * @param {CommandInteraction} interaction - Command interaction
- * @param {Client} client - Discord client
  */
 async function handleSlashCommand(interaction, client) {
     const command = client.commands.get(interaction.commandName);
-
     if (!command) {
         client.logger.warn(`Unknown slash command: ${interaction.commandName}`);
         return interaction.reply({ 
@@ -46,13 +50,12 @@ async function handleSlashCommand(interaction, client) {
 
     try {
         await command.execute(interaction, client);
-        
+
         // Log command usage
         client.logger.logCommand(interaction.commandName, interaction.user, interaction.guild);
-
     } catch (error) {
         client.logger.error(`Error executing slash command ${interaction.commandName}:`, error);
-        
+
         const errorEmbed = EmbedManager.createErrorEmbed('Command Error', 
             'An error occurred while executing this command. Please try again later.');
 
@@ -66,8 +69,6 @@ async function handleSlashCommand(interaction, client) {
 
 /**
  * Handle button interactions
- * @param {ButtonInteraction} interaction - Button interaction
- * @param {Client} client - Discord client
  */
 async function handleButtonInteraction(interaction, client) {
     try {
@@ -81,10 +82,10 @@ async function handleButtonInteraction(interaction, client) {
             await handleClaimTicketButton(interaction, client);
         }
         // Add more button handlers here as needed
-        
+
     } catch (error) {
         client.logger.error('Error handling button interaction:', error);
-        
+
         if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ 
                 embeds: [EmbedManager.createErrorEmbed('Error', 'An error occurred while processing your request.')], 
@@ -96,8 +97,6 @@ async function handleButtonInteraction(interaction, client) {
 
 /**
  * Handle select menu interactions
- * @param {StringSelectMenuInteraction} interaction - Select menu interaction
- * @param {Client} client - Discord client
  */
 async function handleSelectMenuInteraction(interaction, client) {
     try {
@@ -105,10 +104,10 @@ async function handleSelectMenuInteraction(interaction, client) {
             await handleSelfRoleSelection(interaction, client);
         }
         // Add more select menu handlers here as needed
-        
+
     } catch (error) {
         client.logger.error('Error handling select menu interaction:', error);
-        
+
         if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ 
                 embeds: [EmbedManager.createErrorEmbed('Error', 'An error occurred while processing your selection.')], 
@@ -119,9 +118,29 @@ async function handleSelectMenuInteraction(interaction, client) {
 }
 
 /**
+ * Handle modal submissions
+ */
+async function handleModalSubmit(interaction, client) {
+    try {
+        if (interaction.customId === 'close_ticket_modal') {
+            // Handle ticket close modal
+            const closeReason = interaction.fields.getTextInputValue('close_reason') || 'No reason provided';
+            // Add your modal handling logic here
+        }
+    } catch (error) {
+        client.logger.error('Error handling modal submit:', error);
+
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ 
+                embeds: [EmbedManager.createErrorEmbed('Error', 'An error occurred while processing your request.')], 
+                ephemeral: true 
+            });
+        }
+    }
+}
+
+/**
  * Handle giveaway entry button
- * @param {ButtonInteraction} interaction - Button interaction
- * @param {Client} client - Discord client
  */
 async function handleGiveawayEntry(interaction, client) {
     const messageId = interaction.message.id;
@@ -156,14 +175,13 @@ async function handleGiveawayEntry(interaction, client) {
     if (hasEntered) {
         // Remove entry
         client.db.removeGiveawayEntry(giveaway.id, interaction.user.id);
-        
+
         // Update embed with new entry count
         const newEntryCount = entries.length - 1;
-        const { endGiveaway } = require('../commands/giveaway.js');
         const embed = EmbedManager.createGiveawayEmbed(giveaway, newEntryCount);
-        
+
         await interaction.update({ embeds: [embed] });
-        
+
         await interaction.followUp({ 
             embeds: [EmbedManager.createSuccessEmbed('Left Giveaway', 'You have left the giveaway.')], 
             ephemeral: true 
@@ -171,14 +189,13 @@ async function handleGiveawayEntry(interaction, client) {
     } else {
         // Add entry
         client.db.addGiveawayEntry(giveaway.id, interaction.user.id);
-        
+
         // Update embed with new entry count
         const newEntryCount = entries.length + 1;
-        const { endGiveaway } = require('../commands/giveaway.js');
         const embed = EmbedManager.createGiveawayEmbed(giveaway, newEntryCount);
-        
+
         await interaction.update({ embeds: [embed] });
-        
+
         await interaction.followUp({ 
             embeds: [EmbedManager.createSuccessEmbed('Entered Giveaway', 'You have successfully entered the giveaway!')], 
             ephemeral: true 
@@ -188,17 +205,15 @@ async function handleGiveawayEntry(interaction, client) {
 
 /**
  * Handle self-role selection menu
- * @param {StringSelectMenuInteraction} interaction - Select menu interaction
- * @param {Client} client - Discord client
  */
 async function handleSelfRoleSelection(interaction, client) {
     const selectedRoleIds = interaction.values;
     const member = interaction.member;
-    
+
     // Get self-assignable roles
     const selfRoles = client.db.getSelfRoles(interaction.guild.id);
     const selfRoleIds = selfRoles.map(sr => sr.role_id);
-    
+
     const added = [];
     const removed = [];
     const errors = [];
@@ -249,20 +264,17 @@ async function handleSelfRoleSelection(interaction, client) {
     if (errors.length > 0) {
         response += `⚠️ **Errors:** ${errors.join(', ')}\n`;
     }
-
     if (!response) {
         response = 'No changes were made.';
     }
 
     const embed = EmbedManager.createEmbed('Self-Role Update', response.trim());
-    
+
     await interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
 /**
  * Handle create ticket button
- * @param {ButtonInteraction} interaction - Button interaction
- * @param {Client} client - Discord client
  */
 async function handleCreateTicketButton(interaction, client) {
     // Check if user already has an open ticket
@@ -303,24 +315,24 @@ async function handleCreateTicketButton(interaction, client) {
 
         const ticketChannel = await interaction.guild.channels.create({
             name: channelName,
-            type: 0, // ChannelType.GuildText
+            type: ChannelType.GuildText,
             parent: category.id,
             permissionOverwrites: [
                 {
                     id: interaction.guild.roles.everyone.id,
-                    deny: ['ViewChannel']
+                    deny: [PermissionsBitField.Flags.ViewChannel]
                 },
                 {
                     id: interaction.user.id,
-                    allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory']
+                    allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory]
                 },
                 {
                     id: settings.staff_role_id,
-                    allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageMessages']
+                    allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageMessages]
                 },
                 {
                     id: client.user.id,
-                    allow: ['ViewChannel', 'SendMessages', 'ManageMessages']
+                    allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages]
                 }
             ]
         });
@@ -372,7 +384,6 @@ async function handleCreateTicketButton(interaction, client) {
                 await logChannel.send({ embeds: [logEmbed] });
             }
         }
-
     } catch (error) {
         client.logger.error('Error creating ticket from button:', error);
         await interaction.editReply({ 
@@ -383,12 +394,10 @@ async function handleCreateTicketButton(interaction, client) {
 
 /**
  * Handle close ticket button
- * @param {ButtonInteraction} interaction - Button interaction
- * @param {Client} client - Discord client
  */
 async function handleCloseTicketButton(interaction, client) {
     const ticket = client.db.getTicketByChannel(interaction.channel.id);
-    
+
     if (!ticket) {
         return interaction.reply({ 
             embeds: [EmbedManager.createErrorEmbed('Not a Ticket', 'This button can only be used in ticket channels.')], 
@@ -432,7 +441,6 @@ async function handleCloseTicketButton(interaction, client) {
                         { name: 'Claimed by', value: ticket.claimed_by ? `<@${ticket.claimed_by}>` : 'No one', inline: true }
                     ])
                     .setTimestamp();
-
                 await logChannel.send({ embeds: [logEmbed] });
             }
         }
@@ -445,7 +453,6 @@ async function handleCloseTicketButton(interaction, client) {
                 client.logger.error('Error deleting ticket channel:', error);
             }
         }, 10000);
-
     } catch (error) {
         client.logger.error('Error closing ticket from button:', error);
         await interaction.editReply({ 
@@ -456,12 +463,10 @@ async function handleCloseTicketButton(interaction, client) {
 
 /**
  * Handle claim ticket button
- * @param {ButtonInteraction} interaction - Button interaction
- * @param {Client} client - Discord client
  */
 async function handleClaimTicketButton(interaction, client) {
     const ticket = client.db.getTicketByChannel(interaction.channel.id);
-    
+
     if (!ticket) {
         return interaction.reply({ 
             embeds: [EmbedManager.createErrorEmbed('Not a Ticket', 'This button can only be used in ticket channels.')], 
@@ -495,9 +500,6 @@ async function handleClaimTicketButton(interaction, client) {
 
 /**
  * Check permissions for interactions
- * @param {GuildMember} member - Guild member
- * @param {Array} permissions - Required permissions
- * @returns {boolean}
  */
 function checkPermissions(member, permissions) {
     return permissions.some(perm => {

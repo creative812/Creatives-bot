@@ -11,8 +11,6 @@ const CLEANUP_THRESHOLD = 200;
 // ✅ NEW: In-memory conversation storage with smart management
 const conversationHistory = new Map();
 const userCooldowns = new Map();
-
-// ✅ NEW: Game state tracking
 const activeGames = new Map(); // Track active games per user
 
 // ✅ NEW: Topic Transitions & Games
@@ -102,36 +100,29 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
         // Rate limiting per user
         const now = Date.now();
         const lastRequest = userCooldowns.get(userId) || 0;
-
         if (now - lastRequest < 3000) {
             return "⏰ Please wait a moment before sending another message.";
         }
-
         userCooldowns.set(userId, now);
 
         // ✅ CHECK FOR ACTIVE GAME
         const activeGame = activeGames.get(userId);
         let gameContext = '';
-
         if (activeGame) {
             gameContext = `\n\nACTIVE GAME CONTEXT: The user is currently playing ${activeGame.type}. `;
-
             switch (activeGame.type) {
                 case '20questions':
                     gameContext += `You're thinking of "${activeGame.answer}". The user is asking question #${activeGame.guesses + 1}. Answer only YES or NO, and give a hint if they're close. If they guess correctly, congratulate them and end the game.`;
                     activeGame.guesses++;
                     break;
-
                 case 'storytelling':
                     gameContext += `Story so far: "${activeGame.story}" The user is continuing the story. Add their contribution and continue the narrative naturally.`;
                     activeGame.story += ' ' + message;
                     break;
-
                 case 'wouldyourather':
                     gameContext += `The question was: "${activeGame.question}" The user is sharing their choice. Respond to their reasoning and maybe ask a follow-up question about their choice.`;
                     activeGames.delete(userId); // End game after one response
                     break;
-
                 case 'riddles':
                     gameContext += `The riddle was: "${activeGame.riddle.question}" and the answer is "${activeGame.riddle.answer}". Check if their answer is correct and respond accordingly.`;
                     activeGames.delete(userId); // End game after one attempt
@@ -142,7 +133,6 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
         // Get conversation history
         let userHistory = conversationHistory.get(userId) || [];
         userHistory.push({ role: 'user', content: message });
-
         if (userHistory.length > MAX_MESSAGES_PER_USER * 2) {
             userHistory = userHistory.slice(-MAX_MESSAGES_PER_USER * 2);
         }
@@ -151,10 +141,9 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
         let contextMessages = userHistory.slice(0, -1);
         let totalTokens = 0;
         let selectedContext = [];
-
         for (let i = contextMessages.length - 1; i >= 0; i--) {
             const msgTokens = estimateTokens(contextMessages[i].content);
-            if (totalTokens + msgTokens < 2000) { // Reduced to leave room for game context
+            if (totalTokens + msgTokens < 2000) {
                 selectedContext.unshift(contextMessages[i]);
                 totalTokens += msgTokens;
             } else {
@@ -177,10 +166,8 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
 
         // ✅ ENHANCED: System prompt with game context
         let systemPrompt = `You are a helpful AI assistant in a Discord server. You must ALWAYS respond in English only.
-
 Personality: ${personality}
 User type: ${isSpecialUser ? 'VIP user - be respectful, polite, and professional' : 'Regular user - be frank, casual, and feel free to crack appropriate jokes'}
-
 Guidelines:
 - Analyze the user's mood from their message and respond appropriately
 - Keep responses concise (under 1400 characters)
@@ -197,7 +184,7 @@ Guidelines:
             systemPrompt += `\n\nRecent channel context:\n${channelContext}`;
         }
 
-        if (Math.random() < 0.15 && !activeGame) { // Don't add transitions during games
+        if (Math.random() < 0.15 && !activeGame) {
             const transition = topicTransitions[Math.floor(Math.random() * topicTransitions.length)];
             systemPrompt += `\n\nConsider using this natural transition: "${transition}..." if it fits the conversation flow.`;
         }
@@ -246,7 +233,6 @@ Guidelines:
 
     } catch (error) {
         console.error('AI Error:', error);
-
         if (error.code === 'rate_limit_exceeded') {
             return "🚦 I'm thinking too fast! Please try again in a moment.";
         } else if (error.code === 'insufficient_quota') {
@@ -259,7 +245,6 @@ Guidelines:
 
 function cleanUpOldConversations() {
     const entries = Array.from(conversationHistory.entries());
-
     if (entries.length > 100) {
         const keep = entries.slice(-100);
         conversationHistory.clear();
@@ -291,13 +276,11 @@ async function handleToggle(interaction, client) {
     try {
         const enabled = interaction.options.getBoolean('enabled');
         await client.db.setAISetting(interaction.guildId, 'ai_enabled', enabled ? 1 : 0);
-
         const embed = new EmbedBuilder()
             .setColor(enabled ? '#00FF00' : '#FF9900')
             .setTitle('🤖 AI Chat Settings')
             .setDescription(`AI chat has been **${enabled ? 'enabled' : 'disabled'}** for this server.`)
             .setTimestamp();
-
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
         console.error('Toggle error:', error);
@@ -308,7 +291,6 @@ async function handleToggle(interaction, client) {
 async function handleChannel(interaction, client) {
     try {
         const channel = interaction.options.getChannel('channel');
-
         if (!channel.isTextBased()) {
             const embed = new EmbedBuilder()
                 .setColor('#FF0000')
@@ -319,13 +301,11 @@ async function handleChannel(interaction, client) {
         }
 
         await client.db.setAISetting(interaction.guildId, 'ai_channel_id', channel.id);
-
         const embed = new EmbedBuilder()
             .setColor('#00FF00')
             .setTitle('🤖 AI Chat Settings')
             .setDescription(`AI will now respond in ${channel}.`)
             .setTimestamp();
-
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
         console.error('Channel error:', error);
@@ -337,7 +317,6 @@ async function handleSymbol(interaction, client) {
     try {
         const symbol = interaction.options.getString('symbol');
         await client.db.setAISetting(interaction.guildId, 'ai_trigger_symbol', symbol);
-
         const embed = new EmbedBuilder()
             .setColor('#00FF00')
             .setTitle('🤖 AI Chat Settings')
@@ -346,7 +325,6 @@ async function handleSymbol(interaction, client) {
                 { name: 'Usage', value: `Type \`${symbol}your message\` to chat with AI`, inline: false }
             ])
             .setTimestamp();
-
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
         console.error('Symbol error:', error);
@@ -357,11 +335,9 @@ async function handleSymbol(interaction, client) {
 async function handleStatus(interaction, client) {
     try {
         const settings = await getAISettings(client, interaction.guildId);
-
         const channel = settings.channelId ? `<#${settings.channelId}>` : 'Any channel';
         const statusColor = settings.enabled ? '#00FF00' : '#FF0000';
         const statusText = settings.enabled ? '✅ Enabled' : '❌ Disabled';
-
         const userHistory = conversationHistory.get(interaction.user.id);
         const memoryInfo = userHistory ? `${Math.floor(userHistory.length / 2)} exchanges` : 'No history';
 
@@ -378,7 +354,6 @@ async function handleStatus(interaction, client) {
                 { name: '🎭 Enhanced Features', value: '• Advanced mood detection\n• Context-aware responses\n• Natural topic transitions\n• Interactive games', inline: false }
             ])
             .setTimestamp();
-
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
         console.error('Status error:', error);
@@ -398,7 +373,6 @@ async function handleReset(interaction, client) {
             .setTitle('🤖 AI Settings Reset')
             .setDescription('All AI settings have been reset to default values.')
             .setTimestamp();
-
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
         console.error('Reset error:', error);
@@ -426,7 +400,6 @@ async function handlePersonality(interaction, client) {
                 { name: 'Description', value: personalityDescriptions[personality], inline: false }
             ])
             .setTimestamp();
-
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
         console.error('Personality error:', error);
@@ -437,12 +410,11 @@ async function handlePersonality(interaction, client) {
 async function handleClear(interaction, client) {
     try {
         const userId = interaction.user.id;
-
         if (conversationHistory.has(userId)) {
             const historyLength = Math.floor(conversationHistory.get(userId).length / 2);
             conversationHistory.delete(userId);
             userCooldowns.delete(userId);
-            activeGames.delete(userId); // ✅ NEW: Also clear active games
+            activeGames.delete(userId);
 
             await interaction.editReply({ 
                 content: `🧹 Your conversation history and active games have been cleared! (${historyLength} exchanges removed)\nThe AI will start fresh with no memory of our previous conversations.`
@@ -463,7 +435,6 @@ async function handleGame(interaction, client) {
     try {
         const gameType = interaction.options.getString('game');
         const game = conversationGames[gameType];
-
         if (!game) {
             return await interaction.editReply({ content: 'Game not found!' });
         }
@@ -515,7 +486,7 @@ async function handleGame(interaction, client) {
     }
 }
 
-// ✅ FIXED: Single export object with everything included
+// ✅ ROBUST: Main module export with complete duplicate protection
 module.exports = {
     data: [
         new SlashCommandBuilder()
@@ -589,43 +560,94 @@ module.exports = {
                     ))
     ],
 
-    // ✅ FIXED: Proper interaction handling with timeout protection
+    // ✅ BULLETPROOF: Interaction handler with complete duplicate protection
     async execute(interaction, client) {
-        // ✅ DEFER IMMEDIATELY to prevent timeout errors
+        // ✅ PREVENT DUPLICATE PROCESSING with unique lock per interaction
+        const lockKey = `ai_interaction_${interaction.id}`;
+        if (client.processingLocks?.has(lockKey)) {
+            console.log('🔒 [ai.js] Duplicate interaction detected, ignoring');
+            return;
+        }
+        client.processingLocks?.set(lockKey, Date.now());
+
         try {
-            await interaction.deferReply();
-        } catch (error) {
-            console.error('Failed to defer interaction:', error);
+            // ✅ SAFE DEFER: Only defer if not already deferred/replied
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferReply();
+                console.log('🟢 [ai.js] Successfully deferred interaction:', interaction.commandName);
+            } else {
+                console.log('⚠️ [ai.js] Interaction already deferred/replied, skipping:', interaction.commandName);
+                client.processingLocks?.delete(lockKey);
+                return;
+            }
+        } catch (deferError) {
+            console.error('❌ [ai.js] Failed to defer interaction:', deferError.message);
+            client.processingLocks?.delete(lockKey);
             return;
         }
 
         const { commandName } = interaction;
 
         try {
+            // ✅ COMMAND ROUTING with comprehensive error handling
             switch (commandName) {
-                case 'ai-toggle': await handleToggle(interaction, client); break;
-                case 'ai-channel': await handleChannel(interaction, client); break;
-                case 'ai-symbol': await handleSymbol(interaction, client); break;
-                case 'ai-status': await handleStatus(interaction, client); break;
-                case 'ai-reset': await handleReset(interaction, client); break;
-                case 'ai-personality': await handlePersonality(interaction, client); break;
-                case 'ai-clear': await handleClear(interaction, client); break;
-                case 'ai-game': await handleGame(interaction, client); break;
+                case 'ai-toggle': 
+                    await handleToggle(interaction, client); 
+                    break;
+                case 'ai-channel': 
+                    await handleChannel(interaction, client); 
+                    break;
+                case 'ai-symbol': 
+                    await handleSymbol(interaction, client); 
+                    break;
+                case 'ai-status': 
+                    await handleStatus(interaction, client); 
+                    break;
+                case 'ai-reset': 
+                    await handleReset(interaction, client); 
+                    break;
+                case 'ai-personality': 
+                    await handlePersonality(interaction, client); 
+                    break;
+                case 'ai-clear': 
+                    await handleClear(interaction, client); 
+                    break;
+                case 'ai-game': 
+                    await handleGame(interaction, client); 
+                    break;
+                default:
+                    await interaction.editReply({ 
+                        content: '❌ Unknown AI command. Please try again or contact support.' 
+                    });
             }
-        } catch (error) {
-            console.error('AI Command Error:', error);
+
+            console.log('✅ [ai.js] Successfully processed command:', commandName);
+
+        } catch (commandError) {
+            console.error('❌ [ai.js] Error executing command:', commandName, commandError);
 
             try {
-                await interaction.editReply({ 
-                    content: '❌ An error occurred while processing the AI command.'
-                });
+                // ✅ SAFE ERROR RESPONSE: Only respond if we haven't replied yet
+                if (interaction.deferred && !interaction.replied) {
+                    await interaction.editReply({ 
+                        content: '❌ An error occurred while processing your AI command. Please try again later.'
+                    });
+                } else if (!interaction.replied) {
+                    await interaction.followUp({ 
+                        content: '❌ An error occurred while processing your AI command. Please try again later.',
+                        ephemeral: true 
+                    });
+                }
             } catch (replyError) {
-                console.error('Failed to send error response:', replyError);
+                console.error('❌ [ai.js] Failed to send error response:', replyError.message);
             }
+        } finally {
+            // ✅ CLEANUP: Always remove the processing lock
+            client.processingLocks?.delete(lockKey);
         }
     },
 
-    // ✅ FIXED: Export functions as part of the main object (no conflicts!)
+    // ✅ EXPORT FUNCTIONS for messageCreate.js
     getAISettings: getAISettings,
     getAIResponseWithAllFeatures: getAIResponseWithAllFeatures
 };

@@ -1,9 +1,11 @@
 const PermissionManager = require('../utils/permissions.js');
 const EmbedManager = require('../utils/embeds.js');
 const config = require('../config.json');
+
 // Rate limiting
 const cooldowns = new Map();
-// ✅ RESTORED: Load AI module functions
+
+// ✅ Load AI module functions
 let aiModule = null;
 try {
     aiModule = require('../commands/ai.js');
@@ -11,11 +13,13 @@ try {
 } catch (error) {
     console.log('❌ AI module not found:', error.message);
 }
+
 module.exports = {
     name: 'messageCreate',
     async execute(message, client) {
         // Ignore bots and DMs
         if (message.author.bot || !message.guild) return;
+
         // ✅ Handle XP for leveling system
         const xpLockKey = `xp_${message.guild?.id}_${message.author.id}_${message.id}`;
         if (!client.processingLocks.has(xpLockKey)) {
@@ -29,47 +33,109 @@ module.exports = {
                 client.processingLocks.delete(xpLockKey);
             }
         }
-        // ✅ RESTORED: Handle AI responses properly
-        if (aiModule && aiModule.getAISettings && aiModule.getAIResponseWithAllFeatures) {
+
+        // ✅ Handle AI responses - BOTH old trigger system AND new channel system
+        if (aiModule && (aiModule.getAISettings || aiModule.generateAIResponse)) {
             const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
             if (!client.processingLocks.has(aiLockKey)) {
                 client.processingLocks.set(aiLockKey, Date.now());
                 try {
                     console.log(`📨 [messageCreate.js] Processing message: "${message.content}" from ${message.author.username}`);
-                    // Get AI settings
-                    const aiSettings = await aiModule.getAISettings(client, message.guild.id);
-                    console.log('⚙️ AI Settings:', aiSettings);
-                    // Check if AI should respond to this message
-                    if (aiSettings.enabled && 
-                        message.content.startsWith(aiSettings.triggerSymbol) &&
-                        (!aiSettings.channelId || message.channel.id === aiSettings.channelId)) {
-                        const userMessage = message.content.slice(aiSettings.triggerSymbol.length).trim();
-                        if (userMessage) {
-                            console.log(`🤖 AI processing message: "${userMessage}" from ${message.author.username}`);
-                            await message.channel.sendTyping();
-                            const isSpecialUser = message.author.id === '1165238276735639572';
-                            const personality = aiSettings.personality || 'casual';
-                            // ✅ CORRECT: Call the exported function directly
-                            const aiResponse = await aiModule.getAIResponseWithAllFeatures(
-                                userMessage,
-                                isSpecialUser,
-                                personality,
+
+                    // ✅ NEW CHANNEL-BASED AI SYSTEM (Luna)
+                    const aiChannels = client.db.getAIChannels ? client.db.getAIChannels(message.guild.id) : [];
+
+                    if (aiChannels.includes(message.channel.id)) {
+                        // Store user message in channel history
+                        if (client.db.addChannelMessage) {
+                            client.db.addChannelMessage(
+                                message.channel.id,
                                 message.author.id,
-                                message.channel
+                                message.author.username,
+                                message.content,
+                                false // user message
                             );
-                            console.log('✅ AI response generated, sending reply from messageCreate.js');
-                            await message.reply(aiResponse);
                         }
-                    } else {
-                        console.log('❌ AI will not respond because:');
-                        console.log('  - Enabled:', aiSettings.enabled);
-                        console.log('  - Starts with trigger:', message.content.startsWith(aiSettings.triggerSymbol));
-                        console.log('  - Channel match:', !aiSettings.channelId || message.channel.id === aiSettings.channelId);
+
+                        // Check if AI should respond (30% chance or when mentioned)
+                        const shouldRespond = Math.random() < 0.3 || 
+                                           message.content.toLowerCase().includes('luna') ||
+                                           message.content.toLowerCase().includes('ai') ||
+                                           message.mentions.users.has(client.user.id);
+
+                        if (shouldRespond) {
+                            console.log(`🤖 Luna responding to: "${message.content}" from ${message.author.username}`);
+
+                            await message.channel.sendTyping();
+
+                            // Get channel conversation history
+                            const channelHistory = client.db.getChannelHistory ? client.db.getChannelHistory(message.channel.id, 20) : [];
+                            const settings = client.db.getAISetting ? client.db.getAISetting(message.guild.id) : {};
+                            const personality = settings.ai_personality || 'cheerful';
+
+                            // Generate AI response using the new channel-based system
+                            const aiResponse = await aiModule.generateAIResponse(message, channelHistory, personality);
+
+                            // Send response
+                            const aiMessage = await message.channel.send(aiResponse);
+
+                            // Store AI response in channel history
+                            if (client.db.addChannelMessage) {
+                                client.db.addChannelMessage(
+                                    message.channel.id,
+                                    client.user.id,
+                                    'Luna',
+                                    aiResponse,
+                                    true // AI response
+                                );
+                            }
+
+                            console.log('✅ Luna responded successfully');
+                        }
+                    }
+
+                    // ✅ LEGACY TRIGGER-BASED AI SYSTEM (for backward compatibility)
+                    else if (aiModule.getAISettings && aiModule.getAIResponseWithAllFeatures) {
+                        // Get AI settings
+                        const aiSettings = await aiModule.getAISettings(client, message.guild.id);
+                        console.log('⚙️ Legacy AI Settings:', aiSettings);
+
+                        // Check if AI should respond to this message
+                        if (aiSettings.enabled && 
+                            message.content.startsWith(aiSettings.triggerSymbol) &&
+                            (!aiSettings.channelId || message.channel.id === aiSettings.channelId)) {
+
+                            const userMessage = message.content.slice(aiSettings.triggerSymbol.length).trim();
+                            if (userMessage) {
+                                console.log(`🤖 AI processing message: "${userMessage}" from ${message.author.username}`);
+                                await message.channel.sendTyping();
+
+                                const isSpecialUser = message.author.id === '1165238276735639572';
+                                const personality = aiSettings.personality || 'casual';
+
+                                // ✅ CORRECT: Call the exported function directly
+                                const aiResponse = await aiModule.getAIResponseWithAllFeatures(
+                                    userMessage,
+                                    isSpecialUser,
+                                    personality,
+                                    message.author.id,
+                                    message.channel
+                                );
+
+                                console.log('✅ AI response generated, sending reply from messageCreate.js');
+                                await message.reply(aiResponse);
+                            }
+                        } else {
+                            console.log('❌ AI will not respond because:');
+                            console.log('  - Enabled:', aiSettings.enabled);
+                            console.log('  - Starts with trigger:', message.content.startsWith(aiSettings.triggerSymbol));
+                            console.log('  - Channel match:', !aiSettings.channelId || message.channel.id === aiSettings.channelId);
+                        }
                     }
                 } catch (error) {
                     console.error('Error in AI message handler:', error);
                     try {
-                        await message.reply('Sorry, I encountered an error while processing your message. Please try again later.');
+                        await message.channel.send("Sorry sweetie, I'm having a little moment! 🙈💕");
                     } catch (replyError) {
                         console.error('Failed to send AI error message:', replyError);
                     }
@@ -78,23 +144,29 @@ module.exports = {
                 }
             }
         }
+
         // Get guild settings
         const guildSettings = client.db.getGuildSettings(message.guild.id);
         const prefix = guildSettings?.prefix || config.prefix;
+
         // Auto-moderation
         if (guildSettings?.automod_enabled && config.automod.enabled) {
             handleAutoModeration(message, client, guildSettings);
         }
+
         // Check if message starts with prefix
         if (!message.content.startsWith(prefix)) return;
+
         // Parse command and arguments
         const args = message.content.slice(prefix.length).trim().split(/ +/);
         const commandName = args.shift()?.toLowerCase();
         if (!commandName) return;
+
         // Find command
         const command = client.commands.get(commandName) || 
                        client.commands.find(cmd => cmd.aliases?.includes(commandName));
         if (!command) return;
+
         // Check permissions
         if (command.permissions && !checkPermissions(message.member, command.permissions)) {
             return message.reply({ 
@@ -103,6 +175,7 @@ module.exports = {
                 allowedMentions: { repliedUser: false }
             });
         }
+
         // Rate limiting
         if (isRateLimited(message.author.id, commandName)) {
             return message.reply({ 
@@ -111,6 +184,7 @@ module.exports = {
                 allowedMentions: { repliedUser: false }
             });
         }
+
         try {
             // Create interaction-like object for compatibility
             const fakeInteraction = {
@@ -166,8 +240,10 @@ module.exports = {
                     getSubcommand: () => args[0]
                 }
             };
+
             // Execute command
             command.execute(fakeInteraction, client);
+
             // Log command usage
             client.logger.logCommand(commandName, message.author, message.guild);
         } catch (error) {
@@ -179,27 +255,35 @@ module.exports = {
         }
     }
 };
+
 // ✅ Keep all your existing helper functions exactly the same
 function handleAutoModeration(message, client, settings) {
     const content = message.content.toLowerCase();
     const violations = [];
+
     if (PermissionManager.isModerator(message.member)) return;
+
     if (config.automod.spamThreshold && hasSpam(content, config.automod.spamThreshold)) {
         violations.push('spam');
     }
+
     if (config.automod.mentionThreshold && message.mentions.users.size > config.automod.mentionThreshold) {
         violations.push('mention spam');
     }
+
     if (config.automod.capsThreshold && hasExcessiveCaps(content, config.automod.capsThreshold)) {
         violations.push('excessive caps');
     }
+
     if (config.automod.linkWhitelist && hasSuspiciousLinks(content, config.automod.linkWhitelist)) {
         violations.push('suspicious links');
     }
+
     if (violations.length > 0) {
         message.delete().catch(error => {
             client.logger.warn('Failed to delete message in auto-moderation:', error);
         });
+
         const reason = `Auto-moderation: ${violations.join(', ')}`;
         try {
             client.db.addWarning(message.guild.id, message.author.id, client.user.id, reason);
@@ -214,69 +298,66 @@ function handleAutoModeration(message, client, settings) {
         }
     }
 }
+
 function hasSpam(content, threshold) {
-    return /(.)\1{4,}/.test(content) || content.length > 500;
+    const words = content.split(' ');
+    const wordCount = {};
+    for (const word of words) {
+        if (word.length > 3) {
+            wordCount[word] = (wordCount[word] || 0) + 1;
+            if (wordCount[word] >= threshold) return true;
+        }
+    }
+    return false;
 }
+
 function hasExcessiveCaps(content, threshold) {
     if (content.length < 10) return false;
-    const uppercaseCount = (content.match(/[A-Z]/g) || []).length;
-    const letterCount = (content.match(/[A-Za-z]/g) || []).length;
-    return letterCount > 0 && (uppercaseCount / letterCount) * 100 > threshold;
+    const capsCount = (content.match(/[A-Z]/g) || []).length;
+    return (capsCount / content.length) >= threshold;
 }
+
 function hasSuspiciousLinks(content, whitelist) {
-    const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
     const urls = content.match(urlRegex);
-    if (!urls) return false;
-    return urls.some(url => {
-        try {
-            const domain = new URL(url).hostname.toLowerCase();
-            return !whitelist.some(allowed => domain.includes(allowed));
-        } catch {
-            return true;
-        }
-    });
-}
-function checkPermissions(member, permissions) {
-    return permissions.some(perm => {
-        switch (perm) {
-            case 'admin':
-                return PermissionManager.isAdmin(member);
-            case 'moderator':
-                return PermissionManager.isModerator(member);
-            case 'helper':
-                return PermissionManager.isHelper(member);
-            case 'user':
-            default:
-                return true;
-        }
-    });
-}
-function isRateLimited(userId, commandName) {
-    const key = `${userId}-${commandName}`;
-    const now = Date.now();
-    if (!cooldowns.has(key)) {
-        cooldowns.set(key, now);
-        return false;
+    if (!urls) return [];
+
+    for (const url of urls) {
+        const isWhitelisted = whitelist.some(domain => url.includes(domain));
+        if (!isWhitelisted) return true;
     }
-    const lastUsed = cooldowns.get(key);
-    if (now - lastUsed < config.rateLimitWindow) {
+    return false;
+}
+
+function checkPermissions(member, permissions) {
+    return permissions.some(permission => {
+        if (permission === 'ADMINISTRATOR') return member.permissions.has('Administrator');
+        if (permission === 'MANAGE_MESSAGES') return member.permissions.has('ManageMessages');
+        if (permission === 'KICK_MEMBERS') return member.permissions.has('KickMembers');
+        if (permission === 'BAN_MEMBERS') return member.permissions.has('BanMembers');
+        if (permission === 'MANAGE_GUILD') return member.permissions.has('ManageGuild');
+        return false;
+    });
+}
+
+function isRateLimited(userId, commandName) {
+    const key = `${userId}_${commandName}`;
+    const now = Date.now();
+    const cooldown = cooldowns.get(key);
+
+    if (cooldown && (now - cooldown) < 3000) {
         return true;
     }
+
     cooldowns.set(key, now);
     return false;
 }
+
 function getArgIndex(command, optionName) {
-    const argMappings = {
-        user: 0,
-        target: 0,
-        member: 0,
-        amount: 0,
-        duration: 1,
-        reason: 2,
-        role: 0,
-        channel: 0,
-        message: 0,
-        content: 0
-    };
-    return argMappings[optionName] || 0;
+    // Simple helper to map option names to argument indices
+    // You may need to adjust this based on your command structure
+    if (!command.data || !command.data.options) return 0;
+
+    const option = command.data.options.find(opt => opt.name === optionName);
+    return option ? command.data.options.indexOf(option) : 0;
 }

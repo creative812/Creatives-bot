@@ -118,6 +118,11 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
         }
         userCooldowns.set(userId, now);
 
+        // ✅ FIX: Validate message content first
+        if (!message || typeof message !== 'string' || message.trim() === '') {
+            return "I didn't get any message content, sweetie! Could you try saying something? 💕";
+        }
+
         // ✅ CHECK FOR ACTIVE GAME
         const activeGame = activeGames.get(userId);
         let gameContext = '';
@@ -130,7 +135,7 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
                     break;
                 case 'storytelling':
                     gameContext += `Story so far: "${activeGame.story}" The user is continuing the story. Add their contribution and continue the narrative naturally.`;
-                    activeGame.story += ' ' + message.content;
+                    activeGame.story += ' ' + message;
                     break;
                 case 'wouldyourather':
                     gameContext += `The question was: "${activeGame.question}" The user is sharing their choice. Respond to their reasoning and maybe ask a follow-up question about their choice.`;
@@ -145,7 +150,7 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
 
         // Get conversation history
         let userHistory = conversationHistory.get(userId) || [];
-        userHistory.push({ role: 'user', content: message.content });
+        userHistory.push({ role: 'user', content: message });
         if (userHistory.length > MAX_MESSAGES_PER_USER * 2) {
             userHistory = userHistory.slice(-MAX_MESSAGES_PER_USER * 2);
         }
@@ -169,7 +174,7 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
         try {
             const recentMessages = await channel.messages.fetch({ limit: 2 });
             channelContext = recentMessages
-                .filter(m => !m.author.bot && m.content.length > 0 && m.id !== channel.lastMessageId)
+                .filter(m => !m.author.bot && m.content && m.content.length > 0 && m.id !== channel.lastMessageId)
                 .map(m => `${m.author.username}: ${m.content.substring(0, 80)}`)
                 .reverse()
                 .join('\n');
@@ -204,10 +209,22 @@ Guidelines:
             systemPrompt += `\n\nConsider using this natural transition: "${transition}..." if it fits the conversation flow.`;
         }
 
-        // Build messages
+        // Build messages with validation
         let messages = [{ role: "system", content: systemPrompt }];
-        messages = messages.concat(selectedContext);
-        messages.push({ role: 'user', content: message.content });
+
+        // ✅ FIX: Filter out any messages with null/empty content
+        const validSelectedContext = selectedContext.filter(msg => msg.content && msg.content.trim() !== '');
+        messages = messages.concat(validSelectedContext);
+        messages.push({ role: 'user', content: message });
+
+        // ✅ DEBUG: Log payload for debugging (remove after testing)
+        console.log('🔍 OpenAI API Payload:', {
+            model: "gpt-4o-mini",
+            messageCount: messages.length,
+            systemPromptLength: systemPrompt.length,
+            userMessage: message ? 'present' : 'NULL',
+            userMessageLength: message ? message.length : 0
+        });
 
         // API call with retry logic
         let response;
@@ -271,7 +288,7 @@ Guidelines:
     }
 }
 
-// ✅ Channel-based AI Response (for new system)
+// ✅ FIXED: Channel-based AI Response (for new system)
 async function generateAIResponse(message, channelHistory, personality = 'cheerful') {
     try {
         const OpenAI = require('openai');
@@ -286,19 +303,26 @@ async function generateAIResponse(message, channelHistory, personality = 'cheerf
         }
         userCooldowns.set(userId, now);
 
-        // Build context from channel history (last 15 messages)
-        const contextMessages = channelHistory.slice(0, 15).reverse().map(msg => 
-            `${msg.username}: ${msg.message_content}`
-        ).join('\n');
+        // ✅ FIX: Validate message content first
+        if (!message.content || message.content.trim() === '') {
+            return "I didn't get any message content, sweetie! Could you try saying something? 💕";
+        }
+
+        // ✅ FIX: Build context from channel history with null checks
+        const contextMessages = channelHistory
+            .slice(0, 15)
+            .reverse()
+            .filter(msg => msg && msg.message_content && msg.message_content.trim() !== '') // Filter out null/empty
+            .map(msg => `${msg.username}: ${msg.message_content}`)
+            .join('\n');
 
         // Check if special user
         const isSpecialUser = message.author.id === SPECIAL_USER_ID;
 
-        // Build system prompt with feminine personality
+        // ✅ FIX: Build system prompt with validation
         const systemPrompt = `${personalityPrompts[personality]}
 
-Recent conversation context:
-${contextMessages}
+${contextMessages ? `Recent conversation context:\n${contextMessages}\n` : ''}
 
 Guidelines:
 - You must ALWAYS respond in English only
@@ -310,11 +334,20 @@ Guidelines:
 - ${isSpecialUser ? 'This user is VIP - be extra respectful and sweet' : 'Feel free to be casual and playful'}
 - Add natural conversation flow and encourage continued chat`;
 
-        // Build messages for API
+        // ✅ FIX: Build messages with validation
         const messages = [
             { role: "system", content: systemPrompt },
             { role: "user", content: `${message.author.username}: ${message.content}` }
         ];
+
+        // ✅ DEBUG: Log the payload before sending (remove after testing)
+        console.log('🔍 Channel AI Payload:', {
+            model: "gpt-4o-mini",
+            messages: messages.map(m => ({ role: m.role, content: m.content ? 'present' : 'NULL' })),
+            systemLength: systemPrompt.length,
+            userContentLength: message.content.length,
+            contextLength: contextMessages.length
+        });
 
         // API call with retry logic
         let response;
@@ -332,7 +365,11 @@ Guidelines:
                 break;
             } catch (apiError) {
                 retryCount++;
-                console.error(`🚨 OpenAI API Error (attempt ${retryCount}):`, apiError.message);
+                console.error(`🚨 OpenAI API Error (attempt ${retryCount}):`, {
+                    message: apiError.message,
+                    code: apiError.code,
+                    status: apiError.status
+                });
                 if (apiError.code === 'rate_limit_exceeded' && retryCount <= maxRetries) {
                     await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
                 } else {
@@ -348,7 +385,8 @@ Guidelines:
         console.error('🚨 AI Generation Error Details:', {
             message: error.message,
             code: error.code,
-            status: error.status
+            status: error.status,
+            stack: error.stack?.substring(0, 200) + '...'
         });
 
         if (error.code === 'rate_limit_exceeded') {
@@ -565,7 +603,7 @@ async function handlePersonality(interaction, client) {
 async function handleClear(interaction, client) {
     try {
         const userId = interaction.user.id;
-        const channelHistory = client.db.getChannelHistory(interaction.channel.id, 100);
+        const channelHistory = client.db.getChannelHistory ? client.db.getChannelHistory(interaction.channel.id, 100) : [];
 
         if (conversationHistory.has(userId)) {
             const historyLength = Math.floor(conversationHistory.get(userId).length / 2);
@@ -576,7 +614,9 @@ async function handleClear(interaction, client) {
                 content: `🧹 Your personal conversation history and active games have been cleared! (${historyLength} exchanges removed)\n\nChannel memory: ${channelHistory.length} messages remain for context.`
             });
         } else {
-            client.db.clearChannelHistory(interaction.channel.id);
+            if (client.db.clearChannelHistory) {
+                client.db.clearChannelHistory(interaction.channel.id);
+            }
             await interaction.editReply({ 
                 content: '🧹 This channel\'s conversation history has been cleared! It\'s like we\'re meeting for the first time~ 💫'
             });

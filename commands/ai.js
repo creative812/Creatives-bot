@@ -224,6 +224,12 @@ Guidelines:
                 break;
             } catch (apiError) {
                 retryCount++;
+                console.error(`🚨 OpenAI API Error (attempt ${retryCount}):`, {
+                    message: apiError.message,
+                    code: apiError.code,
+                    status: apiError.status,
+                    type: apiError.type
+                });
                 if (apiError.code === 'rate_limit_exceeded' && retryCount <= maxRetries) {
                     await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
                 } else {
@@ -245,13 +251,22 @@ Guidelines:
 
         return aiResponse.length > 1900 ? aiResponse.substring(0, 1900) + "..." : aiResponse;
     } catch (error) {
-        console.error('AI Error:', error);
+        console.error('🚨 Full AI Error Details:', {
+            message: error.message,
+            code: error.code,
+            status: error.status,
+            stack: error.stack?.substring(0, 200) + '...',
+            type: error.type
+        });
+
         if (error.code === 'rate_limit_exceeded') {
             return "🚦 I'm thinking too fast! Please try again in a moment, sweetie~";
         } else if (error.code === 'insufficient_quota') {
             return "💳 OpenAI quota exceeded. Please check your billing, honey~";
+        } else if (error.code === 'invalid_api_key') {
+            return "🔑 There's an issue with my API key, sweetie~";
         } else {
-            return "🤖 Something went wrong with my AI processing. Please try again later, love!";
+            return `🤖 Error: ${error.message}. Please try again later, love!`;
         }
     }
 }
@@ -317,6 +332,7 @@ Guidelines:
                 break;
             } catch (apiError) {
                 retryCount++;
+                console.error(`🚨 OpenAI API Error (attempt ${retryCount}):`, apiError.message);
                 if (apiError.code === 'rate_limit_exceeded' && retryCount <= maxRetries) {
                     await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
                 } else {
@@ -329,11 +345,18 @@ Guidelines:
         return aiResponse.length > 1900 ? aiResponse.substring(0, 1900) + "..." : aiResponse;
 
     } catch (error) {
-        console.error('AI Generation Error:', error);
+        console.error('🚨 AI Generation Error Details:', {
+            message: error.message,
+            code: error.code,
+            status: error.status
+        });
+
         if (error.code === 'rate_limit_exceeded') {
             return "🚦 I'm thinking too fast! Please try again in a moment, honey~";
         } else if (error.code === 'insufficient_quota') {
             return "💳 Oops! My brain needs more power. Please check the OpenAI billing~";
+        } else if (error.code === 'invalid_api_key') {
+            return "🔑 There's an issue with my API key, sweetie~";
         } else {
             const errorResponses = [
                 "Oops! My brain had a little hiccup there~ 💭✨",
@@ -374,7 +397,7 @@ function cleanUpOldConversations() {
     }
 }
 
-// ✅ SLASH COMMAND HANDLERS
+// ✅ ALL YOUR SLASH COMMAND HANDLERS (complete implementations)
 async function handleToggle(interaction, client) {
     try {
         const currentChannels = client.db.getAIChannels(interaction.guild.id);
@@ -564,7 +587,6 @@ async function handleClear(interaction, client) {
     }
 }
 
-// ✅ ENHANCED: Game handler with state tracking
 async function handleGame(interaction, client) {
     try {
         const gameType = interaction.options.getString('game');
@@ -617,7 +639,7 @@ async function handleGame(interaction, client) {
     }
 }
 
-// ✅ ROBUST: Main module export with complete duplicate protection
+// ✅ COMPLETE MODULE EXPORT WITH ALL COMMANDS
 module.exports = {
     data: [
         new SlashCommandBuilder()
@@ -738,9 +760,8 @@ module.exports = {
                     ))
     ],
 
-    // ✅ BULLETPROOF: Interaction handler with complete duplicate protection
+    // ✅ COMPLETE INTERACTION HANDLER
     async execute(interaction, client) {
-        // ✅ PREVENT DUPLICATE PROCESSING with unique lock per interaction
         const lockKey = `ai_interaction_${interaction.id}`;
         if (client.processingLocks?.has(lockKey)) {
             console.log('🔒 [ai.js] Duplicate interaction detected, ignoring');
@@ -749,7 +770,6 @@ module.exports = {
         client.processingLocks?.set(lockKey, Date.now());
 
         try {
-            // ✅ SAFE DEFER: Only defer if not already deferred/replied
             if (!interaction.deferred && !interaction.replied) {
                 await interaction.deferReply();
                 console.log('🟢 [ai.js] Successfully deferred interaction:', interaction.commandName);
@@ -768,7 +788,6 @@ module.exports = {
         const subcommand = interaction.options?.getSubcommand?.() || null;
 
         try {
-            // ✅ COMMAND ROUTING with comprehensive error handling
             if (commandName === 'ai') {
                 switch (subcommand) {
                     case 'toggle': 
@@ -835,7 +854,6 @@ module.exports = {
         } catch (commandError) {
             console.error('❌ [ai.js] Error executing command:', commandName, commandError);
             try {
-                // ✅ SAFE ERROR RESPONSE: Only respond if we haven't replied yet
                 if (interaction.deferred && !interaction.replied) {
                     await interaction.editReply({ 
                         content: '❌ An error occurred while processing your AI command. Please try again later.'
@@ -850,7 +868,6 @@ module.exports = {
                 console.error('❌ [ai.js] Failed to send error response:', replyError.message);
             }
         } finally {
-            // ✅ CLEANUP: Always remove the processing lock
             client.processingLocks?.delete(lockKey);
         }
     },

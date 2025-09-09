@@ -31,7 +31,7 @@ class BotDatabase {
                 user_id TEXT NOT NULL,
                 moderator_id TEXT NOT NULL,
                 reason TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_at TEXT DEFAULT (datetime('now')),
                 expires_at TEXT
             );
 
@@ -43,7 +43,7 @@ class BotDatabase {
                 target_user_id TEXT NOT NULL,
                 reason TEXT,
                 duration TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT (datetime('now'))
             );
 
             CREATE TABLE IF NOT EXISTS self_roles (
@@ -63,14 +63,14 @@ class BotDatabase {
                 ends_at TEXT NOT NULL,
                 ended INTEGER DEFAULT 0,
                 created_by TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT (datetime('now'))
             );
 
             CREATE TABLE IF NOT EXISTS giveaway_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 giveaway_id INTEGER NOT NULL,
                 user_id TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (giveaway_id) REFERENCES giveaways (id) ON DELETE CASCADE
             );
 
@@ -83,7 +83,7 @@ class BotDatabase {
                 ticket_number INTEGER NOT NULL,
                 claimed_by TEXT,
                 closed_by TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_at TEXT DEFAULT (datetime('now')),
                 closed_at TEXT
             );
 
@@ -115,7 +115,7 @@ class BotDatabase {
                 user_id TEXT NOT NULL,
                 username TEXT NOT NULL,
                 message_content TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT (datetime('now'))
             );
 
             CREATE TABLE IF NOT EXISTS user_levels (
@@ -123,7 +123,7 @@ class BotDatabase {
                 user_id TEXT,
                 xp INTEGER DEFAULT 0,
                 level INTEGER DEFAULT 0,
-                last_message TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_message TEXT DEFAULT (datetime('now')),
                 PRIMARY KEY (guild_id, user_id)
             );
 
@@ -154,10 +154,10 @@ class BotDatabase {
                     automod_enabled = excluded.automod_enabled
             `),
 
-            // Warnings
+            // Warnings - FIXED: Single quotes around 'now'
             addWarning: this.db.prepare('INSERT INTO warnings (guild_id, user_id, moderator_id, reason, expires_at) VALUES (?, ?, ?, ?, ?)'),
-            getWarnings: this.db.prepare('SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? AND (expires_at IS NULL OR expires_at > datetime("now"))'),
-            getAllWarnings: this.db.prepare('SELECT * FROM warnings WHERE guild_id = ? AND (expires_at IS NULL OR expires_at > datetime("now"))'),
+            getWarnings: this.db.prepare("SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))"),
+            getAllWarnings: this.db.prepare("SELECT * FROM warnings WHERE guild_id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))"),
             removeWarning: this.db.prepare('DELETE FROM warnings WHERE id = ?'),
             clearWarnings: this.db.prepare('DELETE FROM warnings WHERE guild_id = ? AND user_id = ?'),
 
@@ -170,22 +170,22 @@ class BotDatabase {
             getSelfRoles: this.db.prepare('SELECT * FROM self_roles WHERE guild_id = ?'),
             removeSelfRole: this.db.prepare('DELETE FROM self_roles WHERE guild_id = ? AND role_id = ?'),
 
-            // Giveaways
+            // Giveaways - FIXED: Single quotes around 'now'
             createGiveaway: this.db.prepare('INSERT INTO giveaways (guild_id, channel_id, message_id, prize, winner_count, ends_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)'),
             getGiveaway: this.db.prepare('SELECT * FROM giveaways WHERE message_id = ?'),
-            getActiveGiveaways: this.db.prepare('SELECT * FROM giveaways WHERE ended = 0 AND ends_at <= datetime("now")'),
+            getActiveGiveaways: this.db.prepare("SELECT * FROM giveaways WHERE ended = 0 AND ends_at <= datetime('now')"),
             endGiveaway: this.db.prepare('UPDATE giveaways SET ended = 1 WHERE id = ?'),
             addGiveawayEntry: this.db.prepare('INSERT INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)'),
             removeGiveawayEntry: this.db.prepare('DELETE FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?'),
             getGiveawayEntries: this.db.prepare('SELECT * FROM giveaway_entries WHERE giveaway_id = ?'),
 
-            // Tickets
+            // Tickets - FIXED: Single quotes around 'now'
             createTicket: this.db.prepare('INSERT INTO tickets (guild_id, user_id, channel_id, reason, ticket_number) VALUES (?, ?, ?, ?, ?)'),
             getTicketByChannel: this.db.prepare('SELECT * FROM tickets WHERE channel_id = ?'),
             getUserTicket: this.db.prepare('SELECT * FROM tickets WHERE guild_id = ? AND user_id = ? AND closed_at IS NULL'),
             getOpenTickets: this.db.prepare('SELECT * FROM tickets WHERE guild_id = ? AND closed_at IS NULL'),
             claimTicket: this.db.prepare('UPDATE tickets SET claimed_by = ? WHERE id = ?'),
-            closeTicket: this.db.prepare('UPDATE tickets SET closed_by = ?, closed_at = datetime("now") WHERE id = ?'),
+            closeTicket: this.db.prepare("UPDATE tickets SET closed_by = ?, closed_at = datetime('now') WHERE id = ?"),
             getNextTicketNumber: this.db.prepare('SELECT COALESCE(MAX(ticket_number), 0) + 1 as next_number FROM tickets WHERE guild_id = ?'),
 
             // Ticket Settings
@@ -226,7 +226,7 @@ class BotDatabase {
             getUserLevel: this.db.prepare('SELECT * FROM user_levels WHERE guild_id = ? AND user_id = ?'),
             updateUserLevel: this.db.prepare(`
                 INSERT INTO user_levels (guild_id, user_id, xp, level, last_message)
-                VALUES (?, ?, ?, ?, datetime("now"))
+                VALUES (?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(guild_id, user_id) DO UPDATE SET
                     xp = excluded.xp,
                     level = excluded.level,
@@ -616,13 +616,13 @@ class BotDatabase {
         try {
             this.statements.addChannelMessage.run(guildId, channelId, userId, username, messageContent);
 
-            // Keep only the latest 200 messages per channel
+            // Keep only the latest 200 messages per channel - FIXED: Single quotes
             this.db.exec(`
                 DELETE FROM channel_history 
-                WHERE channel_id = ? 
+                WHERE channel_id = '${channelId}' 
                 AND id NOT IN (
                     SELECT id FROM channel_history 
-                    WHERE channel_id = ? 
+                    WHERE channel_id = '${channelId}' 
                     ORDER BY created_at DESC 
                     LIMIT 200
                 )
@@ -722,17 +722,17 @@ class BotDatabase {
 
     cleanupOldData() {
         try {
-            // Clean up old mod logs (older than 90 days)
-            this.db.exec('DELETE FROM mod_logs WHERE created_at <= datetime("now", "-90 days")');
+            // Clean up old mod logs (older than 90 days) - FIXED: Single quotes
+            this.db.exec("DELETE FROM mod_logs WHERE created_at <= datetime('now', '-90 days')");
 
-            // Clean up old channel history (older than 30 days)
-            this.db.exec('DELETE FROM channel_history WHERE created_at <= datetime("now", "-30 days")');
+            // Clean up old channel history (older than 30 days) - FIXED: Single quotes
+            this.db.exec("DELETE FROM channel_history WHERE created_at <= datetime('now', '-30 days')");
 
-            // Clean up old giveaway entries for ended giveaways
+            // Clean up old giveaway entries for ended giveaways - FIXED: Single quotes
             this.db.exec(`
                 DELETE FROM giveaway_entries 
                 WHERE giveaway_id IN (
-                    SELECT id FROM giveaways WHERE ended = 1 AND created_at <= datetime("now", "-30 days")
+                    SELECT id FROM giveaways WHERE ended = 1 AND created_at <= datetime('now', '-30 days')
                 )
             `);
 

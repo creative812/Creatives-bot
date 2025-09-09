@@ -1,752 +1,640 @@
 const Database = require('better-sqlite3');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
+const Logger = require('../utils/logger.js');
 
-class BotDatabase {
-    constructor() {
-        this.dbPath = path.join(__dirname, 'database.sqlite');
-        this.db = new Database(this.dbPath);
-        this.init();
-        this.prepareStatements();
-        console.log('✅ Database initialized successfully');
-    }
+// Ensure the data directory exists
+const dataDir = path.resolve('./data');
+if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+}
 
-    init() {
-        this.db.exec(`
+// Path to the SQLite database file
+const dbPath = path.join(dataDir, 'bot.db');
+
+// Initialize the SQLite database connection
+const db = new Database(dbPath);
+db.pragma('journal_mode = WAL');
+
+// Initialize all necessary tables and ensure columns exist, including safe migrations
+const initTables = () => {
+    try {
+        // Guild settings table - UPDATED WITH AI FIELDS
+        db.exec(`
             CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id TEXT PRIMARY KEY,
                 prefix TEXT DEFAULT '!',
                 log_channel_id TEXT,
                 welcome_channel_id TEXT,
-                embed_color TEXT DEFAULT '#7289DA',
+                mute_role_id TEXT,
                 auto_role_id TEXT,
                 welcome_message TEXT,
                 leave_message TEXT,
-                automod_enabled INTEGER DEFAULT 0
-            );
+                embed_color TEXT DEFAULT '#7289DA',
+                automod_enabled INTEGER DEFAULT 1,
+                ai_enabled INTEGER DEFAULT 0,
+                ai_channel_id TEXT,
+                ai_trigger_symbol TEXT DEFAULT '!',
+                ai_personality TEXT DEFAULT 'cheerful',
+                ai_channels TEXT DEFAULT '[]',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
 
+        // Channel messages table for AI memory (stores last 100 messages per channel)
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS channel_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                message_content TEXT NOT NULL,
+                is_ai_response INTEGER DEFAULT 0,
+                timestamp INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Add index for better performance
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_channel_timestamp ON channel_messages(channel_id, timestamp)`);
+
+        // Generic settings table for key-value pairs (level channel, messages, etc.)
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS settings (
+                guild_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, key)
+            )
+        `);
+
+        // Users table for leveling (EXP, level, messages)
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS users (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                exp INTEGER DEFAULT 0,
+                lvl INTEGER DEFAULT 0,
+                messages INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        `);
+
+        // Roles table to assign roles by level
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS roles (
+                guild_id TEXT NOT NULL,
+                lvl INTEGER NOT NULL,
+                roleid TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, lvl)
+            )
+        `);
+
+        // Warnings table
+        db.exec(`
             CREATE TABLE IF NOT EXISTS warnings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
                 moderator_id TEXT NOT NULL,
                 reason TEXT,
-                created_at TEXT DEFAULT (datetime('now')),
-                expires_at TEXT
-            );
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME
+            )
+        `);
 
-            CREATE TABLE IF NOT EXISTS mod_logs (
+        // Mutes table
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS mutes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
-                action_type TEXT NOT NULL,
+                user_id TEXT NOT NULL,
                 moderator_id TEXT NOT NULL,
-                target_user_id TEXT NOT NULL,
                 reason TEXT,
-                duration TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
-            );
+                expires_at DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
 
-            CREATE TABLE IF NOT EXISTS self_roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id TEXT NOT NULL,
-                role_id TEXT NOT NULL,
-                description TEXT
-            );
-
+        // Giveaways table
+        db.exec(`
             CREATE TABLE IF NOT EXISTS giveaways (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
-                message_id TEXT NOT NULL,
-                prize TEXT NOT NULL,
+                message_id TEXT UNIQUE,
+                host_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
                 winner_count INTEGER DEFAULT 1,
-                ends_at TEXT NOT NULL,
+                requirements TEXT,
+                ends_at DATETIME NOT NULL,
                 ended INTEGER DEFAULT 0,
-                created_by TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now'))
-            );
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
 
+        // Giveaway entries table
+        db.exec(`
             CREATE TABLE IF NOT EXISTS giveaway_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 giveaway_id INTEGER NOT NULL,
                 user_id TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (giveaway_id) REFERENCES giveaways (id) ON DELETE CASCADE
-            );
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (giveaway_id) REFERENCES giveaways(id),
+                UNIQUE (giveaway_id, user_id)
+            )
+        `);
 
-            CREATE TABLE IF NOT EXISTS tickets (
+        // Moderation logs table
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS mod_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                channel_id TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                target_user_id TEXT NOT NULL,
+                moderator_id TEXT NOT NULL,
                 reason TEXT,
-                ticket_number INTEGER NOT NULL,
-                claimed_by TEXT,
-                closed_by TEXT,
-                created_at TEXT DEFAULT (datetime('now')),
-                closed_at TEXT
-            );
+                duration TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
 
+        // Self-roles table
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS self_roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                role_id TEXT NOT NULL,
+                emoji TEXT,
+                description TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (guild_id, role_id)
+            )
+        `);
+
+        // Ticket settings table
+        db.exec(`
             CREATE TABLE IF NOT EXISTS ticket_settings (
                 guild_id TEXT PRIMARY KEY,
                 category_id TEXT,
                 staff_role_ids TEXT,
-                log_channel_id TEXT
-            );
+                log_channel_id TEXT,
+                next_ticket_number INTEGER DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
 
-            CREATE TABLE IF NOT EXISTS ai_settings (
-                guild_id TEXT PRIMARY KEY,
-                ai_enabled INTEGER DEFAULT 0,
-                ai_channel_id TEXT,
-                ai_trigger_symbol TEXT DEFAULT '!',
-                ai_personality TEXT DEFAULT 'cheerful'
-            );
-
-            CREATE TABLE IF NOT EXISTS ai_channels (
-                guild_id TEXT,
-                channel_id TEXT,
-                PRIMARY KEY (guild_id, channel_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS channel_history (
+        // Tickets table
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
-                channel_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
-                username TEXT NOT NULL,
-                message_content TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS user_levels (
-                guild_id TEXT,
-                user_id TEXT,
-                xp INTEGER DEFAULT 0,
-                level INTEGER DEFAULT 0,
-                last_message TEXT DEFAULT (datetime('now')),
-                PRIMARY KEY (guild_id, user_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS level_roles (
-                guild_id TEXT,
-                level INTEGER,
-                role_id TEXT,
-                PRIMARY KEY (guild_id, level)
-            );
+                channel_id TEXT UNIQUE,
+                ticket_number INTEGER NOT NULL,
+                reason TEXT,
+                status TEXT DEFAULT 'open',
+                claimed_by TEXT,
+                closed_by TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                closed_at DATETIME
+            )
         `);
-    }
 
-    prepareStatements() {
-        this.statements = {
-            // Guild Settings
-            getGuildSettings: this.db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?'),
-            updateGuildSetting: this.db.prepare(`
-                INSERT INTO guild_settings (guild_id, prefix, log_channel_id, welcome_channel_id, embed_color, auto_role_id, welcome_message, leave_message, automod_enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET
-                    prefix = excluded.prefix,
-                    log_channel_id = excluded.log_channel_id,
-                    welcome_channel_id = excluded.welcome_channel_id,
-                    embed_color = excluded.embed_color,
-                    auto_role_id = excluded.auto_role_id,
-                    welcome_message = excluded.welcome_message,
-                    leave_message = excluded.leave_message,
-                    automod_enabled = excluded.automod_enabled
-            `),
-
-            // Warnings - FIXED: Single quotes around 'now'
-            addWarning: this.db.prepare('INSERT INTO warnings (guild_id, user_id, moderator_id, reason, expires_at) VALUES (?, ?, ?, ?, ?)'),
-            getWarnings: this.db.prepare("SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))"),
-            getAllWarnings: this.db.prepare("SELECT * FROM warnings WHERE guild_id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))"),
-            removeWarning: this.db.prepare('DELETE FROM warnings WHERE id = ?'),
-            clearWarnings: this.db.prepare('DELETE FROM warnings WHERE guild_id = ? AND user_id = ?'),
-
-            // Mod Logs
-            addModLog: this.db.prepare('INSERT INTO mod_logs (guild_id, action_type, moderator_id, target_user_id, reason, duration) VALUES (?, ?, ?, ?, ?, ?)'),
-            getModLogs: this.db.prepare('SELECT * FROM mod_logs WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?'),
-
-            // Self Roles
-            addSelfRole: this.db.prepare('INSERT INTO self_roles (guild_id, role_id, description) VALUES (?, ?, ?)'),
-            getSelfRoles: this.db.prepare('SELECT * FROM self_roles WHERE guild_id = ?'),
-            removeSelfRole: this.db.prepare('DELETE FROM self_roles WHERE guild_id = ? AND role_id = ?'),
-
-            // Giveaways - FIXED: Single quotes around 'now'
-            createGiveaway: this.db.prepare('INSERT INTO giveaways (guild_id, channel_id, message_id, prize, winner_count, ends_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)'),
-            getGiveaway: this.db.prepare('SELECT * FROM giveaways WHERE message_id = ?'),
-            getActiveGiveaways: this.db.prepare("SELECT * FROM giveaways WHERE ended = 0 AND ends_at <= datetime('now')"),
-            endGiveaway: this.db.prepare('UPDATE giveaways SET ended = 1 WHERE id = ?'),
-            addGiveawayEntry: this.db.prepare('INSERT INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)'),
-            removeGiveawayEntry: this.db.prepare('DELETE FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?'),
-            getGiveawayEntries: this.db.prepare('SELECT * FROM giveaway_entries WHERE giveaway_id = ?'),
-
-            // Tickets - FIXED: Single quotes around 'now'
-            createTicket: this.db.prepare('INSERT INTO tickets (guild_id, user_id, channel_id, reason, ticket_number) VALUES (?, ?, ?, ?, ?)'),
-            getTicketByChannel: this.db.prepare('SELECT * FROM tickets WHERE channel_id = ?'),
-            getUserTicket: this.db.prepare('SELECT * FROM tickets WHERE guild_id = ? AND user_id = ? AND closed_at IS NULL'),
-            getOpenTickets: this.db.prepare('SELECT * FROM tickets WHERE guild_id = ? AND closed_at IS NULL'),
-            claimTicket: this.db.prepare('UPDATE tickets SET claimed_by = ? WHERE id = ?'),
-            closeTicket: this.db.prepare("UPDATE tickets SET closed_by = ?, closed_at = datetime('now') WHERE id = ?"),
-            getNextTicketNumber: this.db.prepare('SELECT COALESCE(MAX(ticket_number), 0) + 1 as next_number FROM tickets WHERE guild_id = ?'),
-
-            // Ticket Settings
-            getTicketSettings: this.db.prepare('SELECT * FROM ticket_settings WHERE guild_id = ?'),
-            setTicketSettings: this.db.prepare(`
-                INSERT INTO ticket_settings (guild_id, category_id, staff_role_ids, log_channel_id)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET
-                    category_id = excluded.category_id,
-                    staff_role_ids = excluded.staff_role_ids,
-                    log_channel_id = excluded.log_channel_id
-            `),
-
-            // AI Settings
-            getAISetting: this.db.prepare('SELECT * FROM ai_settings WHERE guild_id = ?'),
-            setAISetting: this.db.prepare(`
-                INSERT INTO ai_settings (guild_id, ai_enabled, ai_channel_id, ai_trigger_symbol, ai_personality)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET
-                    ai_enabled = excluded.ai_enabled,
-                    ai_channel_id = excluded.ai_channel_id,
-                    ai_trigger_symbol = excluded.ai_trigger_symbol,
-                    ai_personality = excluded.ai_personality
-            `),
-
-            // AI Channels
-            getAIChannels: this.db.prepare('SELECT channel_id FROM ai_channels WHERE guild_id = ?'),
-            addAIChannel: this.db.prepare('INSERT OR IGNORE INTO ai_channels (guild_id, channel_id) VALUES (?, ?)'),
-            removeAIChannel: this.db.prepare('DELETE FROM ai_channels WHERE guild_id = ? AND channel_id = ?'),
-            clearAIChannels: this.db.prepare('DELETE FROM ai_channels WHERE guild_id = ?'),
-
-            // Channel History
-            addChannelMessage: this.db.prepare('INSERT INTO channel_history (guild_id, channel_id, user_id, username, message_content) VALUES (?, ?, ?, ?, ?)'),
-            getChannelHistory: this.db.prepare('SELECT * FROM channel_history WHERE channel_id = ? ORDER BY created_at DESC LIMIT ?'),
-            clearChannelHistory: this.db.prepare('DELETE FROM channel_history WHERE channel_id = ?'),
-
-            // User Levels
-            getUserLevel: this.db.prepare('SELECT * FROM user_levels WHERE guild_id = ? AND user_id = ?'),
-            updateUserLevel: this.db.prepare(`
-                INSERT INTO user_levels (guild_id, user_id, xp, level, last_message)
-                VALUES (?, ?, ?, ?, datetime('now'))
-                ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                    xp = excluded.xp,
-                    level = excluded.level,
-                    last_message = excluded.last_message
-            `),
-            getTopUsers: this.db.prepare('SELECT * FROM user_levels WHERE guild_id = ? ORDER BY xp DESC LIMIT ?'),
-
-            // Level Roles
-            addLevelRole: this.db.prepare(`
-                INSERT INTO level_roles (guild_id, level, role_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id
-            `),
-            getLevelRoles: this.db.prepare('SELECT * FROM level_roles WHERE guild_id = ? ORDER BY level ASC'),
-            removeLevelRole: this.db.prepare('DELETE FROM level_roles WHERE guild_id = ? AND level = ?')
-        };
-    }
-
-    // ✅ GUILD SETTINGS METHODS
-    getGuildSettings(guildId) {
-        try {
-            const settings = this.statements.getGuildSettings.get(guildId);
-            return settings || {};
-        } catch (error) {
-            console.error('Error getting guild settings:', error);
-            return {};
-        }
-    }
-
-    setGuildSetting(guildId, key, value) {
-        try {
-            console.log(`🔍 [DB] Setting ${key} = ${value} for guild ${guildId}`);
-
-            // Get current settings
-            const currentSettings = this.getGuildSettings(guildId);
-
-            // Update the specific key
-            const newSettings = {
-                prefix: currentSettings.prefix || '!',
-                log_channel_id: currentSettings.log_channel_id,
-                welcome_channel_id: currentSettings.welcome_channel_id,
-                embed_color: currentSettings.embed_color || '#7289DA',
-                auto_role_id: currentSettings.auto_role_id,
-                welcome_message: currentSettings.welcome_message,
-                leave_message: currentSettings.leave_message,
-                automod_enabled: currentSettings.automod_enabled || 0
-            };
-
-            // Update the specific key
-            newSettings[key] = value;
-
-            // Execute the update
-            const result = this.statements.updateGuildSetting.run(
-                guildId,
-                newSettings.prefix,
-                newSettings.log_channel_id,
-                newSettings.welcome_channel_id,
-                newSettings.embed_color,
-                newSettings.auto_role_id,
-                newSettings.welcome_message,
-                newSettings.leave_message,
-                newSettings.automod_enabled
-            );
-
-            // Verify the update worked
-            const verifySettings = this.getGuildSettings(guildId);
-            console.log(`✅ [DB] Verified ${key} = ${verifySettings[key]} for guild ${guildId}`);
-
-            return result;
-        } catch (error) {
-            console.error(`Error setting guild setting ${key}:`, error);
-            throw error;
-        }
-    }
-
-    // ✅ WARNING METHODS
-    addWarning(guildId, userId, moderatorId, reason, expiresAt = null) {
-        try {
-            const result = this.statements.addWarning.run(guildId, userId, moderatorId, reason, expiresAt);
-            return result.lastInsertRowid;
-        } catch (error) {
-            console.error('Error adding warning:', error);
-            throw error;
-        }
-    }
-
-    getWarnings(guildId, userId) {
-        try {
-            if (userId === '0') {
-                return this.statements.getAllWarnings.all(guildId);
+        // Migration fixes - safely add missing columns if not present
+        const addColumnIfNotExists = (table, column, definition) => {
+            try {
+                const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+                const columnExists = columns.some(col => col.name === column);
+                if (!columnExists) {
+                    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+                }
+            } catch (error) {
+                // Column might already exist or table doesn't exist
             }
-            return this.statements.getWarnings.all(guildId, userId);
-        } catch (error) {
-            console.error('Error getting warnings:', error);
-            return [];
-        }
-    }
+        };
 
-    removeWarning(warningId) {
-        try {
-            return this.statements.removeWarning.run(warningId);
-        } catch (error) {
-            console.error('Error removing warning:', error);
-            throw error;
-        }
-    }
+        addColumnIfNotExists('ticket_settings', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+        addColumnIfNotExists('ticket_settings', 'staff_role_ids', 'TEXT');
 
-    clearWarnings(guildId, userId) {
-        try {
-            return this.statements.clearWarnings.run(guildId, userId);
-        } catch (error) {
-            console.error('Error clearing warnings:', error);
-            throw error;
-        }
-    }
+        // AI COLUMNS MIGRATION - Add these for existing databases
+        addColumnIfNotExists('guild_settings', 'ai_enabled', 'INTEGER DEFAULT 0');
+        addColumnIfNotExists('guild_settings', 'ai_channel_id', 'TEXT');
+        addColumnIfNotExists('guild_settings', 'ai_trigger_symbol', "TEXT DEFAULT '!'");
+        addColumnIfNotExists('guild_settings', 'ai_personality', "TEXT DEFAULT 'cheerful'");
+        addColumnIfNotExists('guild_settings', 'ai_channels', 'TEXT DEFAULT "[]"');
 
-    // ✅ MOD LOG METHODS
-    addModLog(guildId, actionType, moderatorId, targetUserId, reason, duration = null) {
-        try {
-            return this.statements.addModLog.run(guildId, actionType, moderatorId, targetUserId, reason, duration);
-        } catch (error) {
-            console.error('Error adding mod log:', error);
-            throw error;
-        }
+        Logger.info('Database tables initialized successfully');
+    } catch (error) {
+        Logger.error('Error initializing database tables:', error);
+        throw error;
     }
+};
 
-    getModLogs(guildId, limit = 50) {
-        try {
-            return this.statements.getModLogs.all(guildId, limit);
-        } catch (error) {
-            console.error('Error getting mod logs:', error);
-            return [];
+initTables();
+
+// Debug output to confirm the ticket_settings columns
+console.log('ticket_settings columns:', db.prepare("PRAGMA table_info(ticket_settings)").all());
+
+// Prepared SQL statements for all features (leveling, tickets, giveaways, moderation, etc.)
+const statements = {
+    // Guild settings - UPDATED TO INCLUDE AI FIELDS
+    getGuildSettings: db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?'),
+    setGuildSettings: db.prepare(`INSERT OR REPLACE INTO guild_settings
+        (guild_id, prefix, log_channel_id, welcome_channel_id, mute_role_id, auto_role_id,
+        welcome_message, leave_message, embed_color, automod_enabled, ai_enabled, ai_channel_id, ai_trigger_symbol, ai_personality, ai_channels, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `),
+
+    // Channel messages for AI memory
+    addChannelMessage: db.prepare(`
+        INSERT INTO channel_messages (channel_id, user_id, username, message_content, is_ai_response, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `),
+
+    getChannelHistory: db.prepare(`
+        SELECT * FROM channel_messages 
+        WHERE channel_id = ? 
+        ORDER BY timestamp DESC 
+        LIMIT ?
+    `),
+
+    cleanOldChannelMessages: db.prepare(`
+        DELETE FROM channel_messages 
+        WHERE channel_id = ? 
+        AND id NOT IN (
+            SELECT id FROM channel_messages 
+            WHERE channel_id = ? 
+            ORDER BY timestamp DESC 
+            LIMIT 100
+        )
+    `),
+
+    getChannelMessageCount: db.prepare(`
+        SELECT COUNT(*) as count FROM channel_messages WHERE channel_id = ?
+    `),
+
+    clearChannelHistory: db.prepare(`DELETE FROM channel_messages WHERE channel_id = ?`),
+
+    // Settings
+    setSetting: db.prepare('INSERT OR REPLACE INTO settings (guild_id, key, value) VALUES (?, ?, ?)'),
+    getSetting: db.prepare('SELECT value FROM settings WHERE guild_id = ? AND key = ?'),
+
+    // Users (leveling)
+    getUser: db.prepare('SELECT * FROM users WHERE guild_id = ? AND user_id = ?'),
+    insertUser: db.prepare('INSERT OR IGNORE INTO users (guild_id, user_id) VALUES (?, ?)'),
+    updateUser: db.prepare('UPDATE users SET exp = ?, lvl = ?, messages = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND user_id = ?'),
+    resetUser: db.prepare('UPDATE users SET exp = 0, lvl = 0, messages = 0, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND user_id = ?'),
+    resetAllUsers: db.prepare('UPDATE users SET exp = 0, lvl = 0, messages = 0, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?'),
+    getLeaderboardByLevel: db.prepare('SELECT user_id, exp, lvl, messages FROM users WHERE guild_id = ? ORDER BY lvl DESC, exp DESC LIMIT ?'),
+    getLeaderboardByMessages: db.prepare('SELECT user_id, exp, lvl, messages FROM users WHERE guild_id = ? ORDER BY messages DESC LIMIT ?'),
+
+    // Roles (level-role mapping)
+    setRoleForLevel: db.prepare('INSERT OR REPLACE INTO roles (guild_id, lvl, roleid) VALUES (?, ?, ?)'),
+    getRoleForLevel: db.prepare('SELECT roleid FROM roles WHERE guild_id = ? AND lvl = ?'),
+
+    // Warnings
+    addWarning: db.prepare('INSERT INTO warnings (guild_id, user_id, moderator_id, reason, expires_at) VALUES (?, ?, ?, ?, ?)'),
+    getWarnings: db.prepare('SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC'),
+    clearWarnings: db.prepare('DELETE FROM warnings WHERE guild_id = ? AND user_id = ?'),
+    deleteWarning: db.prepare('DELETE FROM warnings WHERE id = ?'),
+
+    // Mutes
+    addMute: db.prepare('INSERT INTO mutes (guild_id, user_id, moderator_id, reason, expires_at) VALUES (?, ?, ?, ?, ?)'),
+    getMute: db.prepare('SELECT * FROM mutes WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1'),
+    removeMute: db.prepare('DELETE FROM mutes WHERE guild_id = ? AND user_id = ?'),
+    getExpiredMutes: db.prepare('SELECT * FROM mutes WHERE expires_at <= CURRENT_TIMESTAMP'),
+
+    // Giveaways
+    createGiveaway: db.prepare('INSERT INTO giveaways (guild_id, channel_id, message_id, host_id, title, description, winner_count, requirements, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    getGiveaway: db.prepare('SELECT * FROM giveaways WHERE message_id = ?'),
+    getActiveGiveaways: db.prepare('SELECT * FROM giveaways WHERE ended = 0 AND ends_at <= CURRENT_TIMESTAMP'),
+    endGiveaway: db.prepare('UPDATE giveaways SET ended = 1 WHERE id = ?'),
+    addGiveawayEntry: db.prepare('INSERT OR IGNORE INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)'),
+    getGiveawayEntries: db.prepare('SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?'),
+    removeGiveawayEntry: db.prepare('DELETE FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?'),
+
+    // Moderation logs
+    addModLog: db.prepare('INSERT INTO mod_logs (guild_id, action_type, target_user_id, moderator_id, reason, duration) VALUES (?, ?, ?, ?, ?, ?)'),
+    getModLogs: db.prepare('SELECT * FROM mod_logs WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?'),
+
+    // Self Roles
+    addSelfRole: db.prepare('INSERT OR REPLACE INTO self_roles (guild_id, role_id, emoji, description) VALUES (?, ?, ?, ?)'),
+    removeSelfRole: db.prepare('DELETE FROM self_roles WHERE guild_id = ? AND role_id = ?'),
+    getSelfRoles: db.prepare('SELECT * FROM self_roles WHERE guild_id = ?'),
+
+    // Ticket system
+    setTicketSettings: db.prepare('INSERT OR REPLACE INTO ticket_settings (guild_id, category_id, staff_role_ids, log_channel_id, next_ticket_number, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'),
+    getTicketSettings: db.prepare('SELECT * FROM ticket_settings WHERE guild_id = ?'),
+    getTicketByChannel: db.prepare("SELECT * FROM tickets WHERE channel_id = ? AND status = 'open'"),
+    getUserTicket: db.prepare("SELECT * FROM tickets WHERE guild_id = ? AND user_id = ? AND status = 'open'"),
+    getOpenTickets: db.prepare("SELECT * FROM tickets WHERE guild_id = ? AND status = 'open' ORDER BY created_at DESC"),
+    createTicket: db.prepare('INSERT INTO tickets (guild_id, user_id, channel_id, reason, ticket_number, status) VALUES (?, ?, ?, ?, ?, \'open\')'),
+    closeTicket: db.prepare("UPDATE tickets SET status = 'closed', closed_at = CURRENT_TIMESTAMP, closed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"),
+    claimTicket: db.prepare('UPDATE tickets SET claimed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'),
+
+    // Cleanup old data
+    cleanupOldWarnings: db.prepare('DELETE FROM warnings WHERE expires_at <= CURRENT_TIMESTAMP'),
+    cleanupOldLogs: db.prepare("DELETE FROM mod_logs WHERE created_at <= date('now', '-30 days')"),
+    cleanupOldTickets: db.prepare("DELETE FROM tickets WHERE status = 'closed' AND closed_at <= date('now', '-90 days')")
+};
+
+// Helpers for database operations (ALL YOUR ORIGINAL FUNCTIONS PRESERVED + AI FUNCTIONS ADDED)
+const DatabaseHelpers = {
+    getGuildSettings: (guildId) => statements.getGuildSettings.get(guildId),
+
+    // UPDATED TO HANDLE AI FIELDS
+    setGuildSetting: (guildId, setting, value) => {
+        const current = statements.getGuildSettings.get(guildId) || {};
+        current[setting] = value;
+        return statements.setGuildSettings.run(
+            guildId, current.prefix || '!', current.log_channel_id, current.welcome_channel_id,
+            current.mute_role_id, current.auto_role_id, current.welcome_message, current.leave_message,
+            current.embed_color || '#7289DA', current.automod_enabled === undefined ? 1 : current.automod_enabled,
+            current.ai_enabled === undefined ? 0 : current.ai_enabled, current.ai_channel_id || null,
+            current.ai_trigger_symbol || '!', current.ai_personality || 'cheerful',
+            current.ai_channels || '[]'
+        );
+    },
+
+    // Channel message functions for AI memory
+    addChannelMessage(channelId, userId, username, content, isAI = false) {
+        const timestamp = Date.now();
+        statements.addChannelMessage.run(channelId, userId, username, content, isAI ? 1 : 0, timestamp);
+
+        // Clean old messages if we have more than 100
+        const count = statements.getChannelMessageCount.get(channelId);
+        if (count.count > 100) {
+            statements.cleanOldChannelMessages.run(channelId, channelId);
         }
-    }
+    },
 
-    // ✅ SELF ROLE METHODS
-    addSelfRole(guildId, roleId, description) {
+    getChannelHistory(channelId, limit = 100) {
+        return statements.getChannelHistory.all(channelId, limit);
+    },
+
+    clearChannelHistory(channelId) {
+        statements.clearChannelHistory.run(channelId);
+    },
+
+    setSetting: (guildId, key, value) => statements.setSetting.run(guildId, key, value),
+    getSetting: (guildId, key) => {
+        const res = statements.getSetting.get(guildId, key);
+        return res ? res.value : null;
+    },
+
+    getUser: (guildId, userId) => {
+        statements.insertUser.run(guildId, userId);
+        return statements.getUser.get(guildId, userId);
+    },
+    updateUser: (guildId, userId, exp, lvl, messages) => statements.updateUser.run(exp, lvl, messages, guildId, userId),
+    resetUser: (guildId, userId) => statements.resetUser.run(guildId, userId),
+    resetAllUsers: (guildId) => statements.resetAllUsers.run(guildId),
+    getLeaderboardByLevel: (guildId, limit = 10) => statements.getLeaderboardByLevel.all(guildId, limit),
+    getLeaderboardByMessages: (guildId, limit = 10) => statements.getLeaderboardByMessages.all(guildId, limit),
+
+    setRoleForLevel: (guildId, lvl, roleid) => statements.setRoleForLevel.run(guildId, lvl, roleid),
+    getRoleForLevel: (guildId, lvl) => {
+        const r = statements.getRoleForLevel.get(guildId, lvl);
+        return r ? r.roleid : null;
+    },
+
+    addWarning: (guildId, userId, moderatorId, reason, expiresAt = null) =>
+        statements.addWarning.run(guildId, userId, moderatorId, reason, expiresAt),
+    getWarnings: (guildId, userId) => statements.getWarnings.all(guildId, userId),
+    clearWarnings: (guildId, userId) => statements.clearWarnings.run(guildId, userId),
+
+    addMute: (guildId, userId, moderatorId, reason, expiresAt) =>
+        statements.addMute.run(guildId, userId, moderatorId, reason, expiresAt),
+    getMute: (guildId, userId) => statements.getMute.get(guildId, userId),
+    removeMute: (guildId, userId) => statements.removeMute.run(guildId, userId),
+    getExpiredMutes: () => statements.getExpiredMutes.all(),
+
+    createGiveaway: (guildId, channelId, messageId, hostId, title, description, winnerCount, requirements, endsAt) =>
+        statements.createGiveaway.run(guildId, channelId, messageId, hostId, title, description, winnerCount, requirements, endsAt),
+    getGiveaway: (messageId) => statements.getGiveaway.get(messageId),
+    getActiveGiveaways: () => statements.getActiveGiveaways.all(),
+    endGiveaway: (giveawayId) => statements.endGiveaway.run(giveawayId),
+    addGiveawayEntry: (giveawayId, userId) => statements.addGiveawayEntry.run(giveawayId, userId),
+    getGiveawayEntries: (giveawayId) => statements.getGiveawayEntries.all(giveawayId),
+    removeGiveawayEntry: (giveawayId, userId) => statements.removeGiveawayEntry.run(giveawayId, userId),
+
+    addModLog: (guildId, actionType, targetUserId, moderatorId, reason, duration = null) =>
+        statements.addModLog.run(guildId, actionType, targetUserId, moderatorId, reason, duration),
+    getModLogs: (guildId, limit = 50) => statements.getModLogs.all(guildId, limit),
+
+    addSelfRole: (guildId, roleId, emoji, description) =>
+        statements.addSelfRole.run(guildId, roleId, emoji, description),
+    removeSelfRole: (guildId, roleId) => statements.removeSelfRole.run(guildId, roleId),
+    getSelfRoles: (guildId) => statements.getSelfRoles.all(guildId),
+
+    setTicketSettings(guildId, settings) {
         try {
-            return this.statements.addSelfRole.run(guildId, roleId, description);
+            const staffRoleIds = Array.isArray(settings.staffRoleIds) 
+                ? JSON.stringify(settings.staffRoleIds) 
+                : JSON.stringify([settings.staffRoleIds]);
+            statements.setTicketSettings.run(
+                guildId, 
+                settings.categoryId, 
+                staffRoleIds, 
+                settings.logChannelId, 
+                settings.nextTicketNumber || 1
+            );
         } catch (error) {
-            console.error('Error adding self role:', error);
-            throw error;
+            Logger.error('Error setting ticket settings:', error);
         }
-    }
+    },
 
-    getSelfRoles(guildId) {
+    getTicketSettings(guildId) {
         try {
-            return this.statements.getSelfRoles.all(guildId);
+            return statements.getTicketSettings.get(guildId);
         } catch (error) {
-            console.error('Error getting self roles:', error);
-            return [];
-        }
-    }
-
-    removeSelfRole(guildId, roleId) {
-        try {
-            return this.statements.removeSelfRole.run(guildId, roleId);
-        } catch (error) {
-            console.error('Error removing self role:', error);
-            throw error;
-        }
-    }
-
-    // ✅ GIVEAWAY METHODS
-    createGiveaway(guildId, channelId, messageId, prize, winnerCount, endsAt, createdBy) {
-        try {
-            const result = this.statements.createGiveaway.run(guildId, channelId, messageId, prize, winnerCount, endsAt, createdBy);
-            return result.lastInsertRowid;
-        } catch (error) {
-            console.error('Error creating giveaway:', error);
-            throw error;
-        }
-    }
-
-    getGiveaway(messageId) {
-        try {
-            return this.statements.getGiveaway.get(messageId);
-        } catch (error) {
-            console.error('Error getting giveaway:', error);
+            Logger.error('Error getting ticket settings:', error);
             return null;
         }
-    }
-
-    getActiveGiveaways() {
-        try {
-            return this.statements.getActiveGiveaways.all();
-        } catch (error) {
-            console.error('Error getting active giveaways:', error);
-            return [];
-        }
-    }
-
-    endGiveaway(giveawayId) {
-        try {
-            return this.statements.endGiveaway.run(giveawayId);
-        } catch (error) {
-            console.error('Error ending giveaway:', error);
-            throw error;
-        }
-    }
-
-    addGiveawayEntry(giveawayId, userId) {
-        try {
-            return this.statements.addGiveawayEntry.run(giveawayId, userId);
-        } catch (error) {
-            console.error('Error adding giveaway entry:', error);
-            throw error;
-        }
-    }
-
-    removeGiveawayEntry(giveawayId, userId) {
-        try {
-            return this.statements.removeGiveawayEntry.run(giveawayId, userId);
-        } catch (error) {
-            console.error('Error removing giveaway entry:', error);
-            throw error;
-        }
-    }
-
-    getGiveawayEntries(giveawayId) {
-        try {
-            return this.statements.getGiveawayEntries.all(giveawayId);
-        } catch (error) {
-            console.error('Error getting giveaway entries:', error);
-            return [];
-        }
-    }
-
-    // ✅ TICKET METHODS
-    createTicket(guildId, userId, channelId, reason, ticketNumber) {
-        try {
-            const result = this.statements.createTicket.run(guildId, userId, channelId, reason, ticketNumber);
-            return result.lastInsertRowid;
-        } catch (error) {
-            console.error('Error creating ticket:', error);
-            throw error;
-        }
-    }
-
-    getTicketByChannel(channelId) {
-        try {
-            return this.statements.getTicketByChannel.get(channelId);
-        } catch (error) {
-            console.error('Error getting ticket by channel:', error);
-            return null;
-        }
-    }
-
-    getUserTicket(guildId, userId) {
-        try {
-            return this.statements.getUserTicket.get(guildId, userId);
-        } catch (error) {
-            console.error('Error getting user ticket:', error);
-            return null;
-        }
-    }
-
-    getOpenTickets(guildId) {
-        try {
-            return this.statements.getOpenTickets.all(guildId);
-        } catch (error) {
-            console.error('Error getting open tickets:', error);
-            return [];
-        }
-    }
-
-    claimTicket(ticketId, userId) {
-        try {
-            return this.statements.claimTicket.run(userId, ticketId);
-        } catch (error) {
-            console.error('Error claiming ticket:', error);
-            throw error;
-        }
-    }
-
-    closeTicket(ticketId, userId) {
-        try {
-            return this.statements.closeTicket.run(userId, ticketId);
-        } catch (error) {
-            console.error('Error closing ticket:', error);
-            throw error;
-        }
-    }
+    },
 
     getNextTicketNumber(guildId) {
         try {
-            const result = this.statements.getNextTicketNumber.get(guildId);
-            return result.next_number;
+            const settings = this.getTicketSettings(guildId);
+            if (!settings) return 1;
+            const nextNumber = settings.next_ticket_number || 1;
+            const stmt = db.prepare(`
+                UPDATE ticket_settings 
+                SET next_ticket_number = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE guild_id = ?
+            `);
+            stmt.run(nextNumber + 1, guildId);
+            return nextNumber;
         } catch (error) {
-            console.error('Error getting next ticket number:', error);
+            Logger.error('Error getting next ticket number:', error);
             return 1;
         }
-    }
+    },
 
-    // ✅ TICKET SETTINGS METHODS
-    getTicketSettings(guildId) {
+    createTicket(guildId, userId, channelId, reason, ticketNumber) {
         try {
-            const settings = this.statements.getTicketSettings.get(guildId);
-            if (settings && settings.staff_role_ids) {
-                try {
-                    settings.staff_role_ids = JSON.parse(settings.staff_role_ids);
-                } catch (e) {
-                    settings.staff_role_ids = [settings.staff_role_ids];
-                }
-            }
-            return settings;
+            console.log('Creating ticket with params:', { guildId, userId, channelId, reason, ticketNumber });
+            const result = statements.createTicket.run(guildId, userId, channelId, reason, ticketNumber);
+            console.log('Ticket created with ID:', result.lastInsertRowid);
+            return result.lastInsertRowid;
         } catch (error) {
-            console.error('Error getting ticket settings:', error);
+            console.error('Error creating ticket:', error);
+            Logger.error('Error creating ticket:', error);
             return null;
         }
-    }
+    },
 
-    setTicketSettings(guildId, categoryId, staffRoleIds, logChannelId) {
+    getTicketByChannel(channelId) {
         try {
-            const staffRoleIdsString = Array.isArray(staffRoleIds) ? JSON.stringify(staffRoleIds) : staffRoleIds;
-            return this.statements.setTicketSettings.run(guildId, categoryId, staffRoleIdsString, logChannelId);
+            console.log('Looking for ticket in channel:', channelId);
+            const result = statements.getTicketByChannel.get(channelId);
+            console.log('Found ticket:', result);
+            return result;
         } catch (error) {
-            console.error('Error setting ticket settings:', error);
-            throw error;
-        }
-    }
-
-    // ✅ AI SETTINGS METHODS
-    getAISetting(guildId) {
-        try {
-            return this.statements.getAISetting.get(guildId);
-        } catch (error) {
-            console.error('Error getting AI setting:', error);
+            console.error('Error getting ticket by channel:', error);
+            Logger.error('Error getting ticket by channel:', error);
             return null;
         }
-    }
+    },
 
-    setAISetting(guildId, key, value) {
+    getUserTicket(guildId, userId) {
         try {
-            const currentSettings = this.getAISetting(guildId) || {};
-
-            const newSettings = {
-                ai_enabled: currentSettings.ai_enabled || 0,
-                ai_channel_id: currentSettings.ai_channel_id,
-                ai_trigger_symbol: currentSettings.ai_trigger_symbol || '!',
-                ai_personality: currentSettings.ai_personality || 'cheerful'
-            };
-
-            newSettings[key] = value;
-
-            return this.statements.setAISetting.run(
-                guildId,
-                newSettings.ai_enabled,
-                newSettings.ai_channel_id,
-                newSettings.ai_trigger_symbol,
-                newSettings.ai_personality
-            );
+            return statements.getUserTicket.get(guildId, userId);
         } catch (error) {
-            console.error(`Error setting AI setting ${key}:`, error);
-            throw error;
+            Logger.error('Error getting user ticket:', error);
+            return null;
         }
-    }
+    },
 
-    // ✅ AI CHANNELS METHODS
-    getAIChannels(guildId) {
+    getOpenTickets(guildId) {
         try {
-            const rows = this.statements.getAIChannels.all(guildId);
-            return rows.map(row => row.channel_id);
+            return statements.getOpenTickets.all(guildId);
         } catch (error) {
-            console.error('Error getting AI channels:', error);
+            Logger.error('Error getting open tickets:', error);
             return [];
         }
-    }
+    },
 
-    setAIChannels(guildId, channelIds) {
+    closeTicket(ticketId, closedBy) {
         try {
-            // Clear existing channels
-            this.statements.clearAIChannels.run(guildId);
+            console.log('Closing ticket:', ticketId, 'by user:', closedBy);
+            const result = statements.closeTicket.run(closedBy, ticketId);
+            console.log('Ticket close result:', result);
+        } catch (error) {
+            console.error('Error closing ticket:', error);
+            Logger.error('Error closing ticket:', error);
+        }
+    },
 
-            // Add new channels
-            for (const channelId of channelIds) {
-                this.statements.addAIChannel.run(guildId, channelId);
+    claimTicket(ticketId, claimedBy) {
+        try {
+            statements.claimTicket.run(claimedBy, ticketId);
+        } catch (error) {
+            Logger.error('Error claiming ticket:', error);
+        }
+    },
+
+    getStaffRoleIds(guildId) {
+        try {
+            const settings = this.getTicketSettings(guildId);
+            if (!settings || !settings.staff_role_ids) return [];
+            try {
+                return JSON.parse(settings.staff_role_ids);
+            } catch {
+                return [settings.staff_role_ids];
             }
         } catch (error) {
-            console.error('Error setting AI channels:', error);
-            throw error;
-        }
-    }
-
-    // ✅ CHANNEL HISTORY METHODS
-    addChannelMessage(guildId, channelId, userId, username, messageContent) {
-        try {
-            this.statements.addChannelMessage.run(guildId, channelId, userId, username, messageContent);
-
-            // Keep only the latest 200 messages per channel - FIXED: Single quotes
-            this.db.exec(`
-                DELETE FROM channel_history 
-                WHERE channel_id = '${channelId}' 
-                AND id NOT IN (
-                    SELECT id FROM channel_history 
-                    WHERE channel_id = '${channelId}' 
-                    ORDER BY created_at DESC 
-                    LIMIT 200
-                )
-            `);
-        } catch (error) {
-            console.error('Error adding channel message:', error);
-            throw error;
-        }
-    }
-
-    getChannelHistory(channelId, limit = 100) {
-        try {
-            return this.statements.getChannelHistory.all(channelId, limit);
-        } catch (error) {
-            console.error('Error getting channel history:', error);
+            Logger.error('Error getting staff role IDs:', error);
             return [];
         }
-    }
-
-    clearChannelHistory(channelId) {
-        try {
-            return this.statements.clearChannelHistory.run(channelId);
-        } catch (error) {
-            console.error('Error clearing channel history:', error);
-            throw error;
-        }
-    }
-
-    // ✅ USER LEVEL METHODS
-    getUserLevel(guildId, userId) {
-        try {
-            return this.statements.getUserLevel.get(guildId, userId);
-        } catch (error) {
-            console.error('Error getting user level:', error);
-            return null;
-        }
-    }
-
-    updateUserLevel(guildId, userId, xp, level) {
-        try {
-            return this.statements.updateUserLevel.run(guildId, userId, xp, level);
-        } catch (error) {
-            console.error('Error updating user level:', error);
-            throw error;
-        }
-    }
-
-    getTopUsers(guildId, limit = 10) {
-        try {
-            return this.statements.getTopUsers.all(guildId, limit);
-        } catch (error) {
-            console.error('Error getting top users:', error);
-            return [];
-        }
-    }
-
-    // ✅ LEVEL ROLE METHODS
-    addLevelRole(guildId, level, roleId) {
-        try {
-            return this.statements.addLevelRole.run(guildId, level, roleId);
-        } catch (error) {
-            console.error('Error adding level role:', error);
-            throw error;
-        }
-    }
-
-    getLevelRoles(guildId) {
-        try {
-            return this.statements.getLevelRoles.all(guildId);
-        } catch (error) {
-            console.error('Error getting level roles:', error);
-            return [];
-        }
-    }
-
-    removeLevelRole(guildId, level) {
-        try {
-            return this.statements.removeLevelRole.run(guildId, level);
-        } catch (error) {
-            console.error('Error removing level role:', error);
-            throw error;
-        }
-    }
-
-    // ✅ UTILITY METHODS
-    backup() {
-        try {
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const backupPath = path.join(__dirname, `backup_${timestamp}.db`);
-            this.db.backup(backupPath);
-            return backupPath;
-        } catch (error) {
-            console.error('Error creating backup:', error);
-            throw error;
-        }
-    }
+    },
 
     cleanupOldData() {
+        statements.cleanupOldWarnings.run();
+        statements.cleanupOldLogs.run();
+        statements.cleanupOldTickets.run();
+        Logger.info('Cleaned up old warnings, logs, and tickets');
+    },
+
+    // AI HELPER FUNCTIONS
+    setAISetting(guildId, setting, value) {
+        const current = statements.getGuildSettings.get(guildId) || {};
+        current[setting] = value;
+        return statements.setGuildSettings.run(
+            guildId,
+            current.prefix || '!',
+            current.log_channel_id,
+            current.welcome_channel_id,
+            current.mute_role_id,
+            current.auto_role_id,
+            current.welcome_message,
+            current.leave_message,
+            current.embed_color || '#7289DA',
+            current.automod_enabled === undefined ? 1 : current.automod_enabled,
+            setting === 'ai_enabled' ? (value ? 1 : 0) : (current.ai_enabled === undefined ? 0 : current.ai_enabled),
+            setting === 'ai_channel_id' ? value : (current.ai_channel_id || null),
+            setting === 'ai_trigger_symbol' ? value : (current.ai_trigger_symbol || '!'),
+            setting === 'ai_personality' ? value : (current.ai_personality || 'cheerful'),
+            setting === 'ai_channels' ? (Array.isArray(value) ? JSON.stringify(value) : value) : (current.ai_channels || '[]')
+        );
+    },
+
+    getAISetting(guildId) {
         try {
-            // Clean up old mod logs (older than 90 days) - FIXED: Single quotes
-            this.db.exec("DELETE FROM mod_logs WHERE created_at <= datetime('now', '-90 days')");
-
-            // Clean up old channel history (older than 30 days) - FIXED: Single quotes
-            this.db.exec("DELETE FROM channel_history WHERE created_at <= datetime('now', '-30 days')");
-
-            // Clean up old giveaway entries for ended giveaways - FIXED: Single quotes
-            this.db.exec(`
-                DELETE FROM giveaway_entries 
-                WHERE giveaway_id IN (
-                    SELECT id FROM giveaways WHERE ended = 1 AND created_at <= datetime('now', '-30 days')
-                )
-            `);
-
-            console.log('✅ Database cleanup completed');
+            const row = statements.getGuildSettings.get(guildId);
+            return {
+                ai_enabled: row?.ai_enabled === undefined ? 0 : row.ai_enabled,
+                ai_channel_id: row?.ai_channel_id || null,
+                ai_trigger_symbol: row?.ai_trigger_symbol || '!',
+                ai_personality: row?.ai_personality || 'cheerful',
+                ai_channels: row?.ai_channels || '[]'
+            };
         } catch (error) {
-            console.error('Error during cleanup:', error);
-            throw error;
+            Logger.error('Error getting AI settings:', error);
+            return {
+                ai_enabled: 0,
+                ai_channel_id: null,
+                ai_trigger_symbol: '!',
+                ai_personality: 'cheerful',
+                ai_channels: '[]'
+            };
+        }
+    },
+
+    // AI Channels management
+    setAIChannels(guildId, channelIds) {
+        const channelsArray = Array.isArray(channelIds) ? channelIds : [channelIds];
+        return this.setAISetting(guildId, 'ai_channels', channelsArray);
+    },
+
+    getAIChannels(guildId) {
+        try {
+            const settings = statements.getGuildSettings.get(guildId);
+            if (!settings) return [];
+
+            // Try new ai_channels field first, fallback to old ai_channel_id
+            if (settings.ai_channels) {
+                return JSON.parse(settings.ai_channels);
+            } else if (settings.ai_channel_id) {
+                return [settings.ai_channel_id];
+            }
+            return [];
+        } catch {
+            return [];
         }
     }
+};
 
-    close() {
-        this.db.close();
-    }
-}
-
-// Export a single instance
-module.exports = new BotDatabase();
+module.exports = {
+    db,
+    ...DatabaseHelpers
+};

@@ -100,7 +100,7 @@ const commands = [
                             { name: 'Welcome Channel', value: welcomeChannel, inline: true },
                             { name: 'Auto Role', value: autoRole, inline: true },
                             { name: 'Embed Color', value: settings.embed_color || '#7289DA', inline: true },
-                            { name: 'Auto-Moderation', value: settings.automod_enabled ? 'Enabled' : 'Disabled', inline: true },
+                            { name: 'Auto-Moderation', value: settings.automod_enabled ? 'Enabled' : 'Disabled', inline: false },
                             { name: 'Welcome Message', value: settings.welcome_message || 'Default message', inline: false },
                             { name: 'Leave Message', value: settings.leave_message || 'Default message', inline: false }
                         ]);

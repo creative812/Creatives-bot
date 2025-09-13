@@ -313,28 +313,50 @@ async function handleCreateTicketButton(interaction, client) {
         const ticketNumber = client.db.getNextTicketNumber(interaction.guild.id);
         const channelName = `ticket-${ticketNumber}`;
 
+        // Parse staff role IDs
+        let staffRoleIds = [];
+        if (settings.staff_role_ids) {
+            try {
+                staffRoleIds = JSON.parse(settings.staff_role_ids);
+                if (!Array.isArray(staffRoleIds)) {
+                    staffRoleIds = [settings.staff_role_ids];
+                }
+            } catch {
+                staffRoleIds = [settings.staff_role_ids];
+            }
+        }
+
+        // Build permission overwrites
+        const permissionOverwrites = [
+            {
+                id: interaction.guild.roles.everyone.id,
+                deny: [PermissionsBitField.Flags.ViewChannel]
+            },
+            {
+                id: interaction.user.id,
+                allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory]
+            },
+            {
+                id: client.user.id,
+                allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages]
+            }
+        ];
+
+        // Add staff role permissions
+        staffRoleIds.forEach(roleId => {
+            if (roleId && interaction.guild.roles.cache.has(roleId)) {
+                permissionOverwrites.push({
+                    id: roleId,
+                    allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageMessages]
+                });
+            }
+        });
+
         const ticketChannel = await interaction.guild.channels.create({
             name: channelName,
             type: ChannelType.GuildText,
             parent: category.id,
-            permissionOverwrites: [
-                {
-                    id: interaction.guild.roles.everyone.id,
-                    deny: [PermissionsBitField.Flags.ViewChannel]
-                },
-                {
-                    id: interaction.user.id,
-                    allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory]
-                },
-                {
-                    id: settings.staff_role_id,
-                    allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageMessages]
-                },
-                {
-                    id: client.user.id,
-                    allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages]
-                }
-            ]
+            permissionOverwrites: permissionOverwrites
         });
 
         // Save ticket to database
@@ -363,8 +385,14 @@ async function handleCreateTicketButton(interaction, client) {
                     .setEmoji('👋')
             );
 
+        // Create staff role mentions
+        let staffMentions = '';
+        if (staffRoleIds.length > 0) {
+            staffMentions = ' ' + staffRoleIds.map(roleId => `<@&${roleId}>`).join(' ');
+        }
+
         await ticketChannel.send({ 
-            content: `${interaction.user} <@&${settings.staff_role_id}>`,
+            content: `${interaction.user}${staffMentions}`,
             embeds: [ticketEmbed], 
             components: [ticketRow] 
         });
@@ -406,7 +434,21 @@ async function handleCloseTicketButton(interaction, client) {
     }
 
     const settings = client.db.getTicketSettings(interaction.guild.id);
-    const isStaff = PermissionManager.isHelper(interaction.member) || interaction.member.roles.cache.has(settings?.staff_role_id);
+    
+    // Check if user is staff (helper permissions or has any of the staff roles)
+    let isStaff = PermissionManager.isHelper(interaction.member);
+    if (!isStaff && settings?.staff_role_ids) {
+        try {
+            let staffRoleIds = JSON.parse(settings.staff_role_ids);
+            if (!Array.isArray(staffRoleIds)) {
+                staffRoleIds = [settings.staff_role_ids];
+            }
+            isStaff = staffRoleIds.some(roleId => interaction.member.roles.cache.has(roleId));
+        } catch {
+            isStaff = interaction.member.roles.cache.has(settings.staff_role_ids);
+        }
+    }
+    
     const isTicketOwner = ticket.user_id === interaction.user.id;
 
     if (!isStaff && !isTicketOwner) {

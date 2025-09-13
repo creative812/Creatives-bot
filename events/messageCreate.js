@@ -185,8 +185,8 @@ module.exports = {
         const guildSettings = client.db.getGuildSettings(message.guild.id);
         const prefix = guildSettings?.prefix || config.prefix;
 
-        // Auto-moderation
-        if (guildSettings?.automod_enabled && config.automod.enabled) {
+        // Auto-moderation - only check if enabled in guild settings
+        if (guildSettings?.automod_enabled) {
             handleAutoModeration(message, client, guildSettings);
         }
 
@@ -336,10 +336,14 @@ function handleAutoModeration(message, client, settings) {
 }
 
 function hasSpam(content, threshold) {
-    const words = content.split(' ');
+    // Only check messages longer than 20 characters
+    if (content.length < 20) return false;
+    
+    const words = content.toLowerCase().split(/\s+/);
     const wordCount = {};
     for (const word of words) {
-        if (word.length > 3) {
+        // Only count words longer than 4 characters and filter common words
+        if (word.length > 4 && !isCommonWord(word)) {
             wordCount[word] = (wordCount[word] || 0) + 1;
             if (wordCount[word] >= threshold) return true;
         }
@@ -347,19 +351,29 @@ function hasSpam(content, threshold) {
     return false;
 }
 
+// Common words that shouldn't trigger spam detection
+function isCommonWord(word) {
+    const commonWords = ['that', 'this', 'with', 'from', 'they', 'been', 'have', 'more', 'will', 'said', 'each', 'which', 'their', 'time', 'very', 'when', 'much', 'some', 'these', 'know', 'take', 'than', 'only', 'think', 'come', 'could', 'also', 'like', 'back', 'after', 'first', 'well', 'would', 'there', 'just', 'where', 'haha', 'yeah', 'okay', 'nice', 'good', 'great', 'lmao', 'lmfao'];
+    return commonWords.includes(word);
+}
+
 function hasExcessiveCaps(content, threshold) {
-    if (content.length < 10) return false;
+    if (content.length < 15) return false;
     const capsCount = (content.match(/[A-Z]/g) || []).length;
-    return (capsCount / content.length) >= threshold;
+    const letterCount = (content.match(/[A-Za-z]/g) || []).length;
+    
+    // Only check ratio of caps to letters, not total characters
+    if (letterCount < 10) return false;
+    return (capsCount / letterCount) >= (threshold / 100);
 }
 
 function hasSuspiciousLinks(content, whitelist) {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const urls = content.match(urlRegex);
-    if (!urls) return [];
+    if (!urls) return false;
 
     for (const url of urls) {
-        const isWhitelisted = whitelist.some(domain => url.includes(domain));
+        const isWhitelisted = whitelist.some(domain => url.toLowerCase().includes(domain.toLowerCase()));
         if (!isWhitelisted) return true;
     }
     return false;

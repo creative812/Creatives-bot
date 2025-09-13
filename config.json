@@ -26,9 +26,9 @@
     },
     "automod": {
         "enabled": true,
-        "spamThreshold": 5,
-        "mentionThreshold": 5,
-        "capsThreshold": 70,
-        "linkWhitelist": ["discord.gg", "youtube.com", "github.com"]
+        "spamThreshold": 8,
+        "mentionThreshold": 8,
+        "capsThreshold": 80,
+        "linkWhitelist": ["discord.gg", "youtube.com", "github.com", "twitter.com", "x.com", "reddit.com", "twitch.tv", "instagram.com", "tiktok.com", "spotify.com", "soundcloud.com", "wikipedia.org", "google.com", "imgur.com", "gyazo.com", "steamcommunity.com", "tenor.com", "giphy.com"]
     }
 }

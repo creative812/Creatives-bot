@@ -34,7 +34,7 @@ module.exports = {
             }
         }
 
-        // ✅ Handle AI responses - BOTH old trigger system AND new channel system
+        // ✅ Handle AI responses - Single unified system to prevent duplicates
         if (aiModule && (aiModule.getAISettings || aiModule.generateAIResponse)) {
             const aiLockKey = `ai_${message.guild?.id}_${message.author.id}_${message.id}`;
             if (!client.processingLocks.has(aiLockKey)) {
@@ -42,10 +42,14 @@ module.exports = {
                 try {
                     console.log(`📨 [messageCreate.js] Processing message: "${message.content}" from ${message.author.username}`);
 
-                    // ✅ NEW CHANNEL-BASED AI SYSTEM (Luna)
-                    const aiChannels = client.db.getAIChannels ? client.db.getAIChannels(message.guild.id) : [];
+                    let aiResponseSent = false; // Track if we've already sent a response
 
-                    if (aiChannels.includes(message.channel.id)) {
+                    // ✅ NEW CHANNEL-BASED AI SYSTEM (Luna) - Check first
+                    const aiChannels = client.db.getAIChannels ? client.db.getAIChannels(message.guild.id) : [];
+                    console.log(`🔍 AI Channels for guild: ${aiChannels}, Current channel: ${message.channel.id}`);
+
+                    if (aiChannels.includes(message.channel.id) && !aiResponseSent) {
+                        console.log('📍 Using channel-based AI system (Luna)');
                         // Store user message in channel history
                         if (client.db.addChannelMessage) {
                             client.db.addChannelMessage(
@@ -78,6 +82,7 @@ module.exports = {
 
                             // Send response
                             const aiMessage = await message.channel.send(aiResponse);
+                            aiResponseSent = true;
 
                             // Store AI response in channel history
                             if (client.db.addChannelMessage) {
@@ -90,12 +95,13 @@ module.exports = {
                                 );
                             }
 
-                            console.log('✅ Luna responded successfully');
+                            console.log('✅ Luna responded successfully via channel system');
                         }
                     }
 
-                    // ✅ LEGACY TRIGGER-BASED AI SYSTEM (for backward compatibility)
-                    else if (aiModule.getAISettings && aiModule.getAIResponseWithAllFeatures) {
+                    // ✅ LEGACY TRIGGER-BASED AI SYSTEM (for backward compatibility) - Only if no response sent
+                    if (!aiResponseSent && aiModule.getAISettings && aiModule.getAIResponseWithAllFeatures) {
+                        console.log('📍 Checking legacy trigger-based AI system');
                         // Get AI settings
                         const aiSettings = await aiModule.getAISettings(client, message.guild.id);
                         console.log('⚙️ Legacy AI Settings:', aiSettings);
@@ -122,15 +128,20 @@ module.exports = {
                                     message.channel
                                 );
 
-                                console.log('✅ AI response generated, sending reply from messageCreate.js');
+                                console.log('✅ AI response generated, sending reply from legacy system');
                                 await message.reply(aiResponse);
+                                aiResponseSent = true;
                             }
                         } else {
-                            console.log('❌ AI will not respond because:');
+                            console.log('❌ Legacy AI will not respond because:');
                             console.log('  - Enabled:', aiSettings.enabled);
                             console.log('  - Starts with trigger:', message.content.startsWith(aiSettings.triggerSymbol));
                             console.log('  - Channel match:', !aiSettings.channelId || message.channel.id === aiSettings.channelId);
                         }
+                    }
+
+                    if (!aiResponseSent) {
+                        console.log('ℹ️ No AI response sent for this message');
                     }
                 } catch (error) {
                     console.error('Error in AI message handler:', error);

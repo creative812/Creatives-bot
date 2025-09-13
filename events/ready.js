@@ -1,7 +1,7 @@
 const { ActivityType } = require('discord.js');
 
 module.exports = {
-    name: 'clientready',  
+    name: 'ready',  
     once: true,
     execute(client) {
         console.log('🟡 [ready.js] Handler fired');

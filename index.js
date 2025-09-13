@@ -738,5 +738,8 @@ setInterval(() => {
     }
 }, CONSTANTS.TIMEOUTS.LOCK_CLEANUP_INTERVAL);
 
-module.exports = client;
 console.log('Loaded commands:', Array.from(client.commands.keys()));
+
+
+// Login to Discord
+client.login(process.env.DISCORD_TOKEN);

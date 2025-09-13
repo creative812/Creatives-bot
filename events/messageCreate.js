@@ -295,6 +295,7 @@ module.exports = {
 // ✅ Keep all your existing helper functions exactly the same
 function handleAutoModeration(message, client, settings) {
     const content = message.content.toLowerCase();
+    const originalContent = message.content; // Keep original for caps check
     const violations = [];
 
     if (PermissionManager.isModerator(message.member)) return;
@@ -307,11 +308,11 @@ function handleAutoModeration(message, client, settings) {
         violations.push('mention spam');
     }
 
-    if (config.automod.capsThreshold && hasExcessiveCaps(content, config.automod.capsThreshold)) {
+    if (config.automod.capsThreshold && hasExcessiveCaps(originalContent, config.automod.capsThreshold)) {
         violations.push('excessive caps');
     }
 
-    if (config.automod.linkWhitelist && hasSuspiciousLinks(content, config.automod.linkWhitelist)) {
+    if (config.automod.linkWhitelist && hasSuspiciousLinks(originalContent, config.automod.linkWhitelist)) {
         violations.push('suspicious links');
     }
 
@@ -373,8 +374,21 @@ function hasSuspiciousLinks(content, whitelist) {
     if (!urls) return false;
 
     for (const url of urls) {
-        const isWhitelisted = whitelist.some(domain => url.toLowerCase().includes(domain.toLowerCase()));
-        if (!isWhitelisted) return true;
+        try {
+            const urlObj = new URL(url);
+            const hostname = urlObj.hostname.toLowerCase();
+            
+            // Check if hostname exactly matches or is a subdomain of whitelisted domain
+            const isWhitelisted = whitelist.some(domain => {
+                const lowerDomain = domain.toLowerCase();
+                return hostname === lowerDomain || hostname.endsWith('.' + lowerDomain);
+            });
+            
+            if (!isWhitelisted) return true;
+        } catch (error) {
+            // Invalid URL - treat as suspicious
+            return true;
+        }
     }
     return false;
 }

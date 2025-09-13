@@ -464,16 +464,50 @@ const DatabaseHelpers = {
 
     getNextTicketNumber(guildId) {
         try {
-            const settings = this.getTicketSettings(guildId);
-            if (!settings) return 1;
-            const nextNumber = settings.next_ticket_number || 1;
-            const stmt = db.prepare(`
-                UPDATE ticket_settings 
-                SET next_ticket_number = ?, updated_at = CURRENT_TIMESTAMP 
-                WHERE guild_id = ?
-            `);
-            stmt.run(nextNumber + 1, guildId);
-            return nextNumber;
+            // Ensure ticket settings exist with proper initialization
+            let settings = this.getTicketSettings(guildId);
+            if (!settings) {
+                // Initialize with proper settings structure
+                this.setTicketSettings(guildId, { 
+                    categoryId: null, 
+                    logChannelId: null, 
+                    staffRoleIds: [], 
+                    nextTicketNumber: 1 
+                });
+                settings = { next_ticket_number: 1 };
+            }
+            
+            // ATOMIC operation using transaction for SQLite compatibility
+            const transaction = db.transaction(() => {
+                // First ensure the row exists with UPSERT
+                const upsertStmt = db.prepare(`
+                    INSERT INTO ticket_settings (guild_id, next_ticket_number) 
+                    VALUES (?, 1) 
+                    ON CONFLICT(guild_id) DO NOTHING
+                `);
+                upsertStmt.run(guildId);
+                
+                // Then atomically increment and get the old value
+                const updateStmt = db.prepare(`
+                    UPDATE ticket_settings 
+                    SET next_ticket_number = COALESCE(next_ticket_number, 1) + 1, 
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE guild_id = ?
+                `);
+                updateStmt.run(guildId);
+                
+                // Get the current value (which was just incremented)
+                const selectStmt = db.prepare(`
+                    SELECT next_ticket_number FROM ticket_settings WHERE guild_id = ?
+                `);
+                const result = selectStmt.get(guildId);
+                
+                // Return the previous value (current - 1)
+                return result ? result.next_ticket_number - 1 : 1;
+            });
+            
+            return transaction();
+            
         } catch (error) {
             Logger.error('Error getting next ticket number:', error);
             return 1;

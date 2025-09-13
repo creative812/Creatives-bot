@@ -1,8 +1,6 @@
 require('dotenv').config({ override: true });
 console.log('🔍 Main Bot Debug:');
-console.log('Token loaded:', !!process.env.DISCORD_TOKEN);
-console.log('Token length:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.length : 0);
-console.log('Token starts with:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.substring(0, 20) + '...' : 'UNDEFINED');
+console.log('Token configured:', !!process.env.DISCORD_TOKEN);
 require('./keep_alive.js');
 
 const { 

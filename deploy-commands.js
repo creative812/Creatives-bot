@@ -11,9 +11,7 @@ const clientId = process.env.CLIENT_ID || config.clientId;
 
 // Debug information
 console.log('🔍 Debug Info:');
-console.log('Token exists:', !!token);
-console.log('Token length:', token ? token.length : 0);
-console.log('Token starts with:', token ? token.substring(0, 24) + '...' : 'UNDEFINED');
+console.log('Token configured:', !!token);
 console.log('ClientId:', clientId);
 console.log('Process args:', process.argv);
 

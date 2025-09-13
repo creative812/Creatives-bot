@@ -71,10 +71,113 @@ client.logger = Logger;
 // Store bot start time
 client.startTime = Date.now();
 
-// Initialize storage systems
+// Initialize storage systems with memory management
 client.tempPanelData = new Map();
 client.leaderboardPages = new Map();
 client.userProfiles = new Map();
+
+// Memory management constants
+const MEMORY_LIMITS = {
+    TEMP_PANEL_DATA_LIMIT: 1000,
+    LEADERBOARD_PAGES_LIMIT: 500,
+    USER_PROFILES_LIMIT: 10000,
+    CLEANUP_INTERVAL: 300000, // 5 minutes
+    DATA_TTL: 3600000 // 1 hour for temp data
+};
+
+/**
+ * Clean up memory-bound Maps to prevent memory leaks
+ */
+const cleanupMemoryMaps = () => {
+    const now = Date.now();
+    
+    // Clean up tempPanelData - remove entries older than 1 hour
+    if (client.tempPanelData.size > MEMORY_LIMITS.TEMP_PANEL_DATA_LIMIT) {
+        const entries = Array.from(client.tempPanelData.entries());
+        const validEntries = entries.filter(([key, data]) => {
+            return data && data.timestamp && (now - data.timestamp) < MEMORY_LIMITS.DATA_TTL;
+        }).slice(-MEMORY_LIMITS.TEMP_PANEL_DATA_LIMIT);
+        
+        client.tempPanelData.clear();
+        validEntries.forEach(([key, data]) => client.tempPanelData.set(key, data));
+        
+        if (entries.length > validEntries.length) {
+            console.log(`🧹 Cleaned up tempPanelData: ${entries.length} -> ${validEntries.length} entries`);
+        }
+    }
+    
+    // Clean up leaderboardPages - keep only recent entries
+    if (client.leaderboardPages.size > MEMORY_LIMITS.LEADERBOARD_PAGES_LIMIT) {
+        const entries = Array.from(client.leaderboardPages.entries());
+        const validEntries = entries.filter(([key, data]) => {
+            return data && data.timestamp && (now - data.timestamp) < MEMORY_LIMITS.DATA_TTL;
+        }).slice(-MEMORY_LIMITS.LEADERBOARD_PAGES_LIMIT);
+        
+        client.leaderboardPages.clear();
+        validEntries.forEach(([key, data]) => client.leaderboardPages.set(key, data));
+        
+        if (entries.length > validEntries.length) {
+            console.log(`🧹 Cleaned up leaderboardPages: ${entries.length} -> ${validEntries.length} entries`);
+        }
+    }
+    
+    // Clean up userProfiles - keep only recent entries
+    if (client.userProfiles.size > MEMORY_LIMITS.USER_PROFILES_LIMIT) {
+        const entries = Array.from(client.userProfiles.entries());
+        const validEntries = entries.filter(([key, data]) => {
+            return data && data.lastUpdated && (now - data.lastUpdated) < MEMORY_LIMITS.DATA_TTL;
+        }).slice(-MEMORY_LIMITS.USER_PROFILES_LIMIT);
+        
+        client.userProfiles.clear();
+        validEntries.forEach(([key, data]) => client.userProfiles.set(key, data));
+        
+        if (entries.length > validEntries.length) {
+            console.log(`🧹 Cleaned up userProfiles: ${entries.length} -> ${validEntries.length} entries`);
+        }
+    }
+    
+    // Clean up processing locks - remove entries older than lock TTL
+    const lockEntries = Array.from(client.processingLocks.entries());
+    const validLockEntries = lockEntries.filter(([key, timestamp]) => 
+        (now - timestamp) < CONSTANTS.TIMEOUTS.LOCK_TTL
+    );
+    
+    if (lockEntries.length > validLockEntries.length) {
+        client.processingLocks.clear();
+        validLockEntries.forEach(([key, timestamp]) => client.processingLocks.set(key, timestamp));
+        console.log(`🧹 Cleaned up processing locks: ${lockEntries.length} -> ${validLockEntries.length} entries`);
+    }
+    
+    // Clean up rate limits - remove old entries
+    const rateLimitEntries = Array.from(client.rateLimits.entries());
+    const validRateLimitEntries = rateLimitEntries.filter(([key, data]) => 
+        data && data.resetTime > now
+    );
+    
+    if (rateLimitEntries.length > validRateLimitEntries.length) {
+        client.rateLimits.clear();
+        validRateLimitEntries.forEach(([key, data]) => client.rateLimits.set(key, data));
+        console.log(`🧹 Cleaned up rate limits: ${rateLimitEntries.length} -> ${validRateLimitEntries.length} entries`);
+    }
+};
+
+// Helper functions to add timestamp tracking
+const setTempPanelData = (key, data) => {
+    client.tempPanelData.set(key, { ...data, timestamp: Date.now() });
+};
+
+const setLeaderboardPage = (key, data) => {
+    client.leaderboardPages.set(key, { ...data, timestamp: Date.now() });
+};
+
+const setUserProfile = (key, data) => {
+    client.userProfiles.set(key, { ...data, lastUpdated: Date.now() });
+};
+
+// Expose helper functions
+client.setTempPanelData = setTempPanelData;
+client.setLeaderboardPage = setLeaderboardPage;
+client.setUserProfile = setUserProfile;
 
 // Performance improvements: WeakMap for locks with TTL and caching
 client.processingLocks = new Map();
@@ -119,9 +222,18 @@ for (const file of eventFiles) {
 
 // ✅ DEBUG: Show listener counts (should all be 1)
 console.log('📊 Event Listener Counts:');
-console.log('- ready:', client.listenerCount('ready'));
+console.log('- clientReady:', client.listenerCount('clientReady'));
 console.log('- messageCreate:', client.listenerCount('messageCreate'));
 console.log('- interactionCreate:', client.listenerCount('interactionCreate'));
+
+// Set up memory cleanup interval
+setInterval(() => {
+    try {
+        cleanupMemoryMaps();
+    } catch (error) {
+        console.error('Error during memory cleanup:', error);
+    }
+}, MEMORY_LIMITS.CLEANUP_INTERVAL);
 
 // Store AI command module for message handling
 let aiCommandModule = null;

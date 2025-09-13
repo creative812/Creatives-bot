@@ -20,8 +20,9 @@ const processedMessages = new Set();
 module.exports = {
     name: 'messageCreate',
     async execute(message, client) {
-        // Ignore bots and DMs
-        if (message.author.bot || !message.guild) return;
+        try {
+            // Ignore bots and DMs
+            if (message.author.bot || !message.guild) return;
 
         // DUPLICATE PREVENTION: Check if this exact message has already been processed
         const messageKey = `${message.id}_${message.guild.id}_${message.author.id}`;
@@ -288,6 +289,29 @@ module.exports = {
                 embeds: [EmbedManager.createErrorEmbed('Command Error', 'An error occurred while executing this command.')],
                 allowedMentions: { repliedUser: false }
             });
+        }
+        } catch (error) {
+            // Top-level error handler for messageCreate
+            console.error('🚨 Critical error in messageCreate handler:', error);
+            client.logger.error('Critical messageCreate error:', { 
+                error: error.message, 
+                stack: error.stack,
+                guild: message.guild?.id,
+                channel: message.channel?.id,
+                user: message.author?.id 
+            });
+            
+            // Try to send a user-friendly error message if possible
+            try {
+                if (message.channel && message.channel.send) {
+                    await message.channel.send({
+                        content: '❌ Something went wrong processing your message. Please try again.',
+                        allowedMentions: { repliedUser: false }
+                    });
+                }
+            } catch (replyError) {
+                console.error('Failed to send error message:', replyError.message);
+            }
         }
     }
 };

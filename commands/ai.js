@@ -3,10 +3,12 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('disc
 // Hardcoded special user ID
 const SPECIAL_USER_ID = '1165238276735639572';
 
-// ✅ ENHANCED: Smart conversation memory settings
+// ✅ ENHANCED: Smart conversation memory settings with TTL
 const MAX_MESSAGES_PER_USER = 150;
 const CONTEXT_MESSAGES = 50;
 const CLEANUP_THRESHOLD = 200;
+const CONVERSATION_TTL = 3600000; // 1 hour - conversations older than this will be removed
+const MAX_TOTAL_CONVERSATIONS = 500; // Absolute maximum conversations to keep
 
 // ✅ NEW: In-memory conversation storage with smart management
 const conversationHistory = new Map();
@@ -410,32 +412,93 @@ Special Guidelines for Luna:
 }
 
 function cleanUpOldConversations() {
+    const now = Date.now();
     const entries = Array.from(conversationHistory.entries());
-    if (entries.length > 100) {
-        const keep = entries.slice(-100);
+    let cleanedCount = 0;
+    
+    // First pass: Remove conversations older than TTL
+    const activeEntries = entries.filter(([userId, history]) => {
+        if (!history || !Array.isArray(history) || history.length === 0) {
+            cleanedCount++;
+            return false;
+        }
+        
+        // Find the most recent message timestamp
+        let mostRecentTimestamp = 0;
+        for (const message of history) {
+            if (message && message.timestamp) {
+                mostRecentTimestamp = Math.max(mostRecentTimestamp, message.timestamp);
+            }
+        }
+        
+        // If no valid timestamp found, use fallback (assume recent for safety)
+        if (mostRecentTimestamp === 0) {
+            mostRecentTimestamp = now;
+        }
+        
+        if (now - mostRecentTimestamp > CONVERSATION_TTL) {
+            cleanedCount++;
+            return false;
+        }
+        
+        return true;
+    });
+    
+    // Second pass: If still too many, keep only the most recent conversations
+    let finalEntries = activeEntries;
+    if (activeEntries.length > MAX_TOTAL_CONVERSATIONS) {
+        finalEntries = activeEntries.slice(-MAX_TOTAL_CONVERSATIONS);
+        cleanedCount += activeEntries.length - MAX_TOTAL_CONVERSATIONS;
+    }
+    
+    // Apply cleanup if needed
+    if (cleanedCount > 0) {
         conversationHistory.clear();
-        keep.forEach(([userId, history]) => {
-            conversationHistory.set(userId, history);
+        finalEntries.forEach(([userId, history]) => {
+            // Also trim individual conversation histories and add timestamps
+            const trimmedHistory = history.slice(-MAX_MESSAGES_PER_USER * 2).map(msg => {
+                if (msg && !msg.timestamp) {
+                    msg.timestamp = now; // Add timestamp for future cleanup
+                }
+                return msg;
+            });
+            conversationHistory.set(userId, trimmedHistory);
         });
 
-        // Also clean up cooldowns and games for removed users
-        const activeCooldowns = Array.from(userCooldowns.entries())
-            .filter(([userId]) => conversationHistory.has(userId));
+        // Clean up cooldowns - remove expired ones and those for removed users
+        const cooldownEntries = Array.from(userCooldowns.entries());
+        const activeCooldowns = cooldownEntries.filter(([userId, timestamp]) => {
+            // Remove if conversation was removed or cooldown is old (>10 minutes)
+            return conversationHistory.has(userId) && (now - timestamp) < 600000;
+        });
         userCooldowns.clear();
-        activeCooldowns.forEach(([userId, time]) => {
-            userCooldowns.set(userId, time);
+        activeCooldowns.forEach(([userId, timestamp]) => {
+            userCooldowns.set(userId, timestamp);
         });
 
-        const activeGameEntries = Array.from(activeGames.entries())
-            .filter(([userId]) => conversationHistory.has(userId));
+        // Clean up active games for removed users
+        const gameEntries = Array.from(activeGames.entries());
+        const activeGameEntries = gameEntries.filter(([userId, game]) => {
+            return conversationHistory.has(userId);
+        });
         activeGames.clear();
         activeGameEntries.forEach(([userId, game]) => {
             activeGames.set(userId, game);
         });
 
-        console.log(`🧹 Cleaned up conversations, kept ${keep.length} recent users`);
+        console.log(`🧹 AI Memory Cleanup: Removed ${cleanedCount} old conversations, kept ${finalEntries.length} active conversations`);
+        console.log(`🧹 Cooldowns: ${cooldownEntries.length} -> ${activeCooldowns.length}, Games: ${gameEntries.length} -> ${activeGameEntries.length}`);
     }
 }
+
+// Enhanced periodic cleanup for AI memory
+setInterval(() => {
+    try {
+        cleanUpOldConversations();
+    } catch (error) {
+        console.error('Error during AI memory cleanup:', error);
+    }
+}, 300000); // Run cleanup every 5 minutes
 
 // ✅ ALL SLASH COMMAND HANDLERS (with ultra feminine responses)
 async function handleToggle(interaction, client) {

@@ -1,7 +1,7 @@
 const { ActivityType } = require('discord.js');
 
 module.exports = {
-    name: 'ready',  
+    name: 'clientReady',  
     once: true,
     execute(client) {
         console.log('🟡 [ready.js] Handler fired');
@@ -26,8 +26,8 @@ module.exports = {
         // Set initial activity
         updateActivity();
 
-        // Change activity every 30 seconds
-        setInterval(updateActivity, 30000);
+        // Change activity every 5 minutes to avoid rate limits
+        setInterval(updateActivity, 300000);
 
         // Log some startup statistics
         client.logger.info(`Commands loaded: ${client.commands.size}`);

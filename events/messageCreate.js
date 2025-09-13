@@ -162,6 +162,12 @@ module.exports = {
                     if (!aiResponseSent) {
                         console.log('ℹ️ No AI response sent for this message');
                     }
+                    
+                    // ✅ CRITICAL FIX: Return early if AI handled the message to prevent command system from also processing it
+                    if (aiResponseSent) {
+                        console.log('🔒 AI handled message, skipping command processing');
+                        return;
+                    }
                 } catch (error) {
                     console.error('Error in AI message handler:', error);
                     try {

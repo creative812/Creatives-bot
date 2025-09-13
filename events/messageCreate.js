@@ -14,11 +14,30 @@ try {
     console.log('❌ AI module not found:', error.message);
 }
 
+// Global message processing tracker to prevent duplicates
+const processedMessages = new Set();
+
 module.exports = {
     name: 'messageCreate',
     async execute(message, client) {
         // Ignore bots and DMs
         if (message.author.bot || !message.guild) return;
+
+        // DUPLICATE PREVENTION: Check if this exact message has already been processed
+        const messageKey = `${message.id}_${message.guild.id}_${message.author.id}`;
+        if (processedMessages.has(messageKey)) {
+            console.log(`🚫 [messageCreate.js] DUPLICATE detected, skipping: "${message.content}" from ${message.author.username}`);
+            return;
+        }
+        
+        // Mark this message as being processed
+        processedMessages.add(messageKey);
+        
+        // Clean up old processed messages (keep only last 1000)
+        if (processedMessages.size > 1000) {
+            const entries = Array.from(processedMessages);
+            entries.slice(0, entries.length - 500).forEach(key => processedMessages.delete(key));
+        }
 
         // ✅ Handle XP for leveling system
         const xpLockKey = `xp_${message.guild?.id}_${message.author.id}_${message.id}`;

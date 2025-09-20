@@ -1,6 +1,18 @@
 const PermissionManager = require('../utils/permissions.js');
 const EmbedManager = require('../utils/embeds.js');
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField, RESTJSONErrorCodes, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder } = require('discord.js');
+const { 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    ChannelType, 
+    PermissionsBitField, 
+    RESTJSONErrorCodes, 
+    ModalBuilder, 
+    TextInputBuilder, 
+    TextInputStyle, 
+    EmbedBuilder,
+    StringSelectMenuBuilder
+} = require('discord.js');
 
 module.exports = {
     name: 'interactionCreate',
@@ -46,7 +58,7 @@ async function handleSlashCommand(interaction, client) {
         });
     }
 
-    // Check if command is disabled
+    // Check if command is disabled - NEW FEATURE
     const disabledCommand = client.db.getDisabledCommand(interaction.guild.id, interaction.commandName);
     if (disabledCommand) {
         const disabledEmbed = EmbedManager.createErrorEmbed(
@@ -55,8 +67,8 @@ async function handleSlashCommand(interaction, client) {
         )
         .addFields(
             { name: '📝 Reason', value: disabledCommand.reason || 'No reason provided', inline: false },
-            { name: '👤 Disabled By', value: `<@${disabledCommand.disabled_by}>`, inline: true },
-            { name: '⏰ Date', value: `<t:${Math.floor(new Date(disabledCommand.created_at).getTime() / 1000)}:F>`, inline: true }
+            { name: '👤 Disabled By', value: `<@${disabledCommand.disabledby}>`, inline: true },
+            { name: '⏰ Date', value: `<t:${Math.floor(new Date(disabledCommand.createdat).getTime() / 1000)}:F>`, inline: true }
         )
         .setColor('#FF6B6B');
 
@@ -111,10 +123,12 @@ async function handleSlashCommand(interaction, client) {
         await command.execute(interaction, client);
 
         // Log command usage with enhanced details
-        client.logger.logCommand(interaction.commandName, interaction.user, interaction.guild, {
-            options: interaction.options?.data,
-            channel: interaction.channel?.name
-        });
+        if (client.logger && client.logger.logCommand) {
+            client.logger.logCommand(interaction.commandName, interaction.user, interaction.guild, {
+                options: interaction.options?.data,
+                channel: interaction.channel?.name
+            });
+        }
     } catch (error) {
         client.logger.error(`Error executing slash command ${interaction.commandName}:`, error);
 
@@ -208,6 +222,8 @@ async function handleSelectMenuInteraction(interaction, client) {
     try {
         if (interaction.customId === 'selfrole_select') {
             await handleSelfRoleSelection(interaction, client);
+        } else if (interaction.customId === 'ticketstaffroles') {
+            await handleTicketStaffRoleSelection(interaction, client);
         } else if (interaction.customId.startsWith('filter_')) {
             await handleFilterSelection(interaction, client);
         } else {
@@ -273,7 +289,7 @@ async function handleGiveawayEntry(interaction, client) {
     }
 
     // Check if giveaway has expired
-    if (new Date(giveaway.ends_at) < new Date()) {
+    if (new Date(giveaway.endsat) < new Date()) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎁 Giveaway Expired', 'This giveaway has expired.')],
             ephemeral: true
@@ -281,14 +297,14 @@ async function handleGiveawayEntry(interaction, client) {
     }
 
     const entries = client.db.getGiveawayEntries(giveaway.id);
-    const hasEntered = entries.some(entry => entry.user_id === interaction.user.id);
+    const hasEntered = entries.some(entry => entry.userid === interaction.user.id);
 
     if (hasEntered) {
         // Remove entry
         client.db.removeGiveawayEntry(giveaway.id, interaction.user.id);
         const newEntryCount = entries.length - 1;
 
-        const embed = EmbedManager.createGiveawayEmbed(giveaway, newEntryCount);
+        const embed = createGiveawayEmbed(giveaway, newEntryCount);
         await interaction.update({ embeds: [embed] });
         await safeReply(interaction, {
             embeds: [EmbedManager.createSuccessEmbed('✅ Left Giveaway', 'You have successfully left the giveaway.')],
@@ -299,7 +315,7 @@ async function handleGiveawayEntry(interaction, client) {
         client.db.addGiveawayEntry(giveaway.id, interaction.user.id);
         const newEntryCount = entries.length + 1;
 
-        const embed = EmbedManager.createGiveawayEmbed(giveaway, newEntryCount);
+        const embed = createGiveawayEmbed(giveaway, newEntryCount);
         await interaction.update({ embeds: [embed] });
         await safeReply(interaction, {
             embeds: [EmbedManager.createSuccessEmbed('🎉 Entered Giveaway', 'You have successfully entered the giveaway!')],
@@ -319,7 +335,7 @@ async function handleCreateTicketButton(interaction, client) {
         });
     }
 
-    const category = interaction.guild.channels.cache.get(settings.category_id);
+    const category = interaction.guild.channels.cache.get(settings.categoryid);
     if (!category) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎫 Category Not Found', 'The ticket category could not be found.')],
@@ -331,7 +347,7 @@ async function handleCreateTicketButton(interaction, client) {
     const existingTicket = client.db.getUserTicket(interaction.guild.id, interaction.user.id);
     if (existingTicket) {
         return safeReply(interaction, {
-            embeds: [EmbedManager.createErrorEmbed('🎫 Ticket Already Exists', `You already have an open ticket: <#${existingTicket.channel_id}>`)],
+            embeds: [EmbedManager.createErrorEmbed('🎫 Ticket Already Exists', `You already have an open ticket: <#${existingTicket.channelid}>`)],
             ephemeral: true
         });
     }
@@ -345,14 +361,14 @@ async function handleCreateTicketButton(interaction, client) {
 
         // Parse staff role IDs safely
         let staffRoleIds = [];
-        if (settings.staff_role_ids) {
+        if (settings.staffroleids) {
             try {
-                staffRoleIds = JSON.parse(settings.staff_role_ids);
+                staffRoleIds = JSON.parse(settings.staffroleids);
                 if (!Array.isArray(staffRoleIds)) {
-                    staffRoleIds = [settings.staff_role_ids];
+                    staffRoleIds = [settings.staffroleids];
                 }
             } catch {
-                staffRoleIds = [settings.staff_role_ids];
+                staffRoleIds = [settings.staffroleids];
             }
         }
 
@@ -464,8 +480,8 @@ async function handleCreateTicketButton(interaction, client) {
         });
 
         // Enhanced logging
-        if (settings.log_channel_id) {
-            const logChannel = interaction.guild.channels.cache.get(settings.log_channel_id);
+        if (settings.logchannelid) {
+            const logChannel = interaction.guild.channels.cache.get(settings.logchannelid);
             if (logChannel) {
                 const logEmbed = EmbedManager.createEmbed(
                     '🎫 New Ticket Created',
@@ -506,7 +522,7 @@ async function handleCloseTicketButton(interaction, client) {
     let canClose = false;
 
     // Ticket owner can close
-    if (ticket.user_id === interaction.user.id) {
+    if (ticket.userid === interaction.user.id) {
         canClose = true;
     }
 
@@ -516,15 +532,15 @@ async function handleCloseTicketButton(interaction, client) {
     }
 
     // Check staff roles
-    if (!canClose && settings?.staff_role_ids) {
+    if (!canClose && settings?.staffroleids) {
         try {
-            let staffRoleIds = JSON.parse(settings.staff_role_ids);
+            let staffRoleIds = JSON.parse(settings.staffroleids);
             if (!Array.isArray(staffRoleIds)) {
-                staffRoleIds = [settings.staff_role_ids];
+                staffRoleIds = [settings.staffroleids];
             }
             canClose = staffRoleIds.some(roleId => interaction.member.roles.cache.has(roleId));
         } catch {
-            canClose = interaction.member.roles.cache.has(settings.staff_role_ids);
+            canClose = interaction.member.roles.cache.has(settings.staffroleids);
         }
     }
 
@@ -572,8 +588,8 @@ async function handleClaimTicketButton(interaction, client) {
         });
     }
 
-    if (ticket.claimed_by) {
-        const claimedUser = await client.users.fetch(ticket.claimed_by).catch(() => null);
+    if (ticket.claimedby) {
+        const claimedUser = await client.users.fetch(ticket.claimedby).catch(() => null);
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed(
                 '⚠️ Already Claimed', 
@@ -638,22 +654,22 @@ async function handleTicketCloseModal(interaction, client) {
 
         // Enhanced logging
         const settings = client.db.getTicketSettings(interaction.guild.id);
-        if (settings?.log_channel_id) {
-            const logChannel = interaction.guild.channels.cache.get(settings.log_channel_id);
+        if (settings?.logchannelid) {
+            const logChannel = interaction.guild.channels.cache.get(settings.logchannelid);
             if (logChannel) {
-                const user = await client.users.fetch(ticket.user_id).catch(() => null);
-                const duration = Math.round((Date.now() - new Date(ticket.created_at).getTime()) / 60000);
+                const user = await client.users.fetch(ticket.userid).catch(() => null);
+                const duration = Math.round((Date.now() - new Date(ticket.createdat).getTime()) / 60000);
 
                 const logEmbed = EmbedManager.createEmbed(
                     '🔒 Ticket Closed',
-                    `Ticket #${ticket.ticket_number} has been closed`,
+                    `Ticket #${ticket.ticketnumber} has been closed`,
                     null
                 ).addFields(
                     { name: '👤 Original Creator', value: user ? `${user.tag} (${user.id})` : 'Unknown User', inline: true },
                     { name: '🔒 Closed By', value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
                     { name: '📝 Reason', value: closeReason, inline: false },
                     { name: '⏱️ Duration', value: `${duration} minutes`, inline: true },
-                    { name: '🙋 Claimed By', value: ticket.claimed_by ? `<@${ticket.claimed_by}>` : 'Unclaimed', inline: true }
+                    { name: '🙋 Claimed By', value: ticket.claimedby ? `<@${ticket.claimedby}>` : 'Unclaimed', inline: true }
                 ).setColor('#FF0000').setTimestamp();
 
                 await logChannel.send({ embeds: [logEmbed] });
@@ -685,7 +701,7 @@ async function handleSelfRoleSelection(interaction, client) {
 
     // Get self-assignable roles
     const selfRoles = client.db.getSelfRoles(interaction.guild.id);
-    const validRoleIds = selfRoles.map(role => role.role_id);
+    const validRoleIds = selfRoles.map(role => role.roleid);
 
     const rolesToAdd = [];
     const rolesToRemove = [];
@@ -748,6 +764,72 @@ async function handleSelfRoleSelection(interaction, client) {
             ephemeral: true
         });
     }
+}
+
+// Handle ticket staff role selection (for ticket panel setup)
+async function handleTicketStaffRoleSelection(interaction, client) {
+    if (!client.tempPanelData) client.tempPanelData = new Map();
+
+    const storageKey = interaction.user.id + interaction.guild.id;
+    const panelData = client.tempPanelData.get(storageKey);
+
+    if (!panelData) {
+        return safeReply(interaction, {
+            content: '❌ Panel setup session expired. Please run the command again.',
+            ephemeral: true
+        });
+    }
+
+    const selectedRoleIds = interaction.values;
+
+    // Update settings with selected staff roles
+    client.db.setTicketSettings(
+        panelData.guildId, 
+        null, // category will remain the same
+        JSON.stringify(selectedRoleIds), 
+        null, // log channel will remain the same
+        null // ticket number will remain the same
+    );
+
+    // Create the ticket panel
+    const embed = EmbedManager.createEmbed(
+        panelData.title,
+        panelData.description,
+        null
+    ).setColor('#00FF00');
+
+    const button = new ButtonBuilder()
+        .setCustomId('createticketbutton')
+        .setLabel(panelData.buttonText)
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji('🎫');
+
+    const row = new ActionRowBuilder().addComponents(button);
+
+    await interaction.update({
+        content: '✅ **Step 2 Complete!** Here is your ticket panel:',
+        embeds: [embed],
+        components: [row]
+    });
+
+    // Clean up temp data
+    client.tempPanelData.delete(storageKey);
+}
+
+// Helper function to create giveaway embed
+function createGiveawayEmbed(giveaway, entryCount) {
+    const embed = EmbedManager.createEmbed(
+        `🎉 ${giveaway.title}`,
+        giveaway.description || 'No description provided',
+        null
+    ).addFields(
+        { name: '🎁 Prize', value: giveaway.title, inline: true },
+        { name: '👥 Entries', value: entryCount.toString(), inline: true },
+        { name: '🏆 Winners', value: giveaway.winnercount.toString(), inline: true },
+        { name: '⏰ Ends', value: `<t:${Math.floor(new Date(giveaway.endsat).getTime() / 1000)}:F>`, inline: false }
+    ).setColor('#FF69B4').setTimestamp();
+
+    return embed;
 }
 
 // Placeholder handlers for future features

@@ -119,7 +119,7 @@ module.exports = {
 
                 const embed = EmbedManager.createSuccessEmbed('Command Enabled', `Successfully enabled the \`${commandName}\` command.`)
                     .addFields(
-                        { name: '👤 Previously Disabled By', value: `<@${disabled.disabled_by}>`, inline: true },
+                        { name: '👤 Previously Disabled By', value: `<@${disabled.disabledby}>`, inline: true },
                         { name: '📝 Original Reason', value: disabled.reason || 'No reason provided', inline: false },
                         { name: '✅ Enabled By', value: interaction.user.tag, inline: true },
                         { name: '⏰ Date', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
@@ -145,10 +145,10 @@ module.exports = {
 
                 // Group commands for better display
                 const commandList = disabledCommands.map((cmd, index) => {
-                    const disabledDate = new Date(cmd.created_at).getTime();
-                    return `**${index + 1}.** \`${cmd.command_name}\`\n` +
+                    const disabledDate = new Date(cmd.createdat).getTime();
+                    return `**${index + 1}.** \`${cmd.commandname}\`\n` +
                            `└ **Reason:** ${cmd.reason || 'No reason provided'}\n` +
-                           `└ **By:** <@${cmd.disabled_by}> • <t:${Math.floor(disabledDate / 1000)}:R>`;
+                           `└ **By:** <@${cmd.disabledby}> • <t:${Math.floor(disabledDate / 1000)}:R>`;
                 }).join('\n\n');
 
                 // Split into multiple embeds if too long
@@ -158,10 +158,10 @@ module.exports = {
 
                     for (let i = 0; i < disabledCommands.length; i++) {
                         const cmd = disabledCommands[i];
-                        const disabledDate = new Date(cmd.created_at).getTime();
-                        const cmdString = `**${i + 1}.** \`${cmd.command_name}\`\n` +
+                        const disabledDate = new Date(cmd.createdat).getTime();
+                        const cmdString = `**${i + 1}.** \`${cmd.commandname}\`\n` +
                                         `└ **Reason:** ${cmd.reason || 'No reason provided'}\n` +
-                                        `└ **By:** <@${cmd.disabled_by}> • <t:${Math.floor(disabledDate / 1000)}:R>\n\n`;
+                                        `└ **By:** <@${cmd.disabledby}> • <t:${Math.floor(disabledDate / 1000)}:R>\n\n`;
 
                         if (currentChunk.length + cmdString.length > 4000) {
                             chunks.push(currentChunk);
@@ -198,12 +198,12 @@ module.exports = {
                 const disabled = client.db.getDisabledCommand(interaction.guild.id, commandName);
 
                 if (disabled) {
-                    const disabledDate = new Date(disabled.created_at).getTime();
+                    const disabledDate = new Date(disabled.createdat).getTime();
                     const embed = EmbedManager.createEmbed('🔴 Command Status', `Command \`${commandName}\` is **disabled**.`, null)
                         .setColor('#FF0000') // Red color for disabled
                         .addFields(
                             { name: '📝 Reason', value: disabled.reason || 'No reason provided', inline: false },
-                            { name: '👤 Disabled By', value: `<@${disabled.disabled_by}>`, inline: true },
+                            { name: '👤 Disabled By', value: `<@${disabled.disabledby}>`, inline: true },
                             { name: '⏰ Date', value: `<t:${Math.floor(disabledDate / 1000)}:F>`, inline: true },
                             { name: '📊 Duration', value: `<t:${Math.floor(disabledDate / 1000)}:R>`, inline: true }
                         );
@@ -248,7 +248,7 @@ module.exports = {
                     // Show only disabled commands
                     const disabledCommands = interaction.client.db.getDisabledCommands(interaction.guild.id);
                     choices = disabledCommands
-                        .map(cmd => cmd.command_name)
+                        .map(cmd => cmd.commandname)
                         .filter(cmd => cmd.toLowerCase().includes(focusedOption.value.toLowerCase()))
                         .slice(0, 25)
                         .sort();

@@ -269,16 +269,6 @@ Guidelines:
         messages = messages.concat(validSelectedContext);
         messages.push({ role: 'user', content: message });
 
-        // ✅ DEBUG: Log payload for debugging (remove after testing)
-        console.log('🔍 OpenAI API Payload:', {
-            model: "gpt-4o-mini",
-            messageCount: messages.length,
-            personality: personality,
-            systemPromptLength: systemPrompt.length,
-            userMessage: message ? 'present' : 'NULL',
-            userMessageLength: message ? message.length : 0
-        });
-
         // API call with retry logic
         let response;
         let retryCount = 0;
@@ -421,16 +411,6 @@ Special Guidelines for ${aiName}:
             { role: "user", content: `${message.author.username}: ${message.content}` }
         ];
 
-        // ✅ DEBUG: Log the payload before sending (remove after testing)
-        console.log('🔍 Channel AI Payload:', {
-            model: "gpt-4o-mini",
-            personality: personality,
-            messages: messages.map(m => ({ role: m.role, content: m.content ? 'present' : 'NULL' })),
-            systemLength: systemPrompt.length,
-            userContentLength: message.content.length,
-            contextLength: contextMessages.length
-        });
-
         // API call with retry logic
         let response;
         let retryCount = 0;
@@ -566,10 +546,9 @@ function cleanUpOldConversations() {
             conversationHistory.set(userId, trimmedHistory);
         });
 
-        // Clean up cooldowns - remove expired ones and those for removed users
+        // Clean up cooldowns
         const cooldownEntries = Array.from(userCooldowns.entries());
         const activeCooldowns = cooldownEntries.filter(([userId, timestamp]) => {
-            // Remove if conversation was removed or cooldown is old (>10 minutes)
             return conversationHistory.has(userId) && (now - timestamp) < 600000;
         });
         userCooldowns.clear();
@@ -577,7 +556,7 @@ function cleanUpOldConversations() {
             userCooldowns.set(userId, timestamp);
         });
 
-        // Clean up active games for removed users
+        // Clean up active games
         const gameEntries = Array.from(activeGames.entries());
         const activeGameEntries = gameEntries.filter(([userId, game]) => {
             return conversationHistory.has(userId);
@@ -588,7 +567,6 @@ function cleanUpOldConversations() {
         });
 
         console.log(`🧹 AI Memory Cleanup: Removed ${cleanedCount} old conversations, kept ${finalEntries.length} active conversations`);
-        console.log(`🧹 Cooldowns: ${cooldownEntries.length} -> ${activeCooldowns.length}, Games: ${gameEntries.length} -> ${activeGameEntries.length}`);
     }
 }
 
@@ -601,7 +579,7 @@ setInterval(() => {
     }
 }, 300000); // Run cleanup every 5 minutes
 
-// ✅ ALL SLASH COMMAND HANDLERS (with personality support including Sylus)
+// ✅ COMMAND HANDLERS
 async function handleToggle(interaction, client) {
     try {
         const currentChannels = client.db.getAIChannels(interaction.guild.id);
@@ -691,14 +669,11 @@ async function handleStatus(interaction, client) {
         const settings = await getAISettings(client, interaction.guildId);
         const channels = client.db.getAIChannels(interaction.guild.id);
         const history = client.db.getChannelHistory ? client.db.getChannelHistory(interaction.channel.id, 100) : [];
-        const channel = settings.channelId ? `<#${settings.channelId}>` : 'Any channel';
-        const statusColor = settings.enabled ? '#00FF00' : '#FF0000';
-        const statusText = settings.enabled ? '✅ Enabled' : '❌ Disabled';
         const userHistory = conversationHistory.get(interaction.user.id);
         const memoryInfo = userHistory ? `${Math.floor(userHistory.length / 2)} exchanges` : 'No history yet';
 
         // ✅ PERSONALITY-AWARE STATUS DISPLAY
-        const personalityName = settings.ai_personality || 'cheerful';
+        const personalityName = settings.personality || 'cheerful';
         const aiName = personalityName === 'sylus' ? 'Sylus' : 'Luna';
         const personalityEmoji = personalityName === 'sylus' ? '⚡' : '💖';
 
@@ -867,9 +842,10 @@ async function handleGame(interaction, client) {
     }
 }
 
-// ✅ COMPLETE MODULE EXPORT WITH ALL COMMANDS (Updated with Sylus)
+// ✅ FIXED MODULE EXPORT WITH PROPER COMMAND STRUCTURE
 module.exports = {
     data: [
+        // ✅ MAIN AI COMMAND (subcommands)
         new SlashCommandBuilder()
             .setName('ai')
             .setDescription('Configure AI chat settings! 💕')
@@ -923,39 +899,7 @@ module.exports = {
                     )
             ),
 
-        // Legacy commands for backward compatibility
-        new SlashCommandBuilder()
-            .setName('ai-toggle')
-            .setDescription('Enable or disable AI chat feature! 💕')
-            .addBooleanOption(option =>
-                option.setName('enabled')
-                    .setDescription('Turn AI chat on or off')
-                    .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-        new SlashCommandBuilder()
-            .setName('ai-channel')
-            .setDescription('Set which channel AI should chat in! 🌸')
-            .addChannelOption(option =>
-                option.setName('channel')
-                    .setDescription('Channel where AI should respond')
-                    .setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-        new SlashCommandBuilder()
-            .setName('ai-symbol')
-            .setDescription('Set the symbol that triggers AI responses! ✨')
-            .addStringOption(option =>
-                option.setName('symbol')
-                    .setDescription('Symbol to trigger AI (e.g., !, ?, @)')
-                    .setRequired(true)
-                    .setMaxLength(5))
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-        new SlashCommandBuilder()
-            .setName('ai-status')
-            .setDescription('Check AI current settings! 💖'),
-        new SlashCommandBuilder()
-            .setName('ai-reset')
-            .setDescription('Reset all AI settings to default! 🔄')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+        // ✅ LEGACY STANDALONE COMMANDS (NO subcommands - FIXED!)
         new SlashCommandBuilder()
             .setName('ai-personality')
             .setDescription('Set AI personality type! 🎭')
@@ -972,9 +916,48 @@ module.exports = {
                         { name: '⚡ Cool Sylus', value: 'sylus' }
                     ))
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+        new SlashCommandBuilder()
+            .setName('ai-toggle')
+            .setDescription('Enable or disable AI chat feature! 💕')
+            .addBooleanOption(option =>
+                option.setName('enabled')
+                    .setDescription('Turn AI chat on or off')
+                    .setRequired(true))
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+        new SlashCommandBuilder()
+            .setName('ai-channel')
+            .setDescription('Set which channel AI should chat in! 🌸')
+            .addChannelOption(option =>
+                option.setName('channel')
+                    .setDescription('Channel where AI should respond')
+                    .setRequired(true))
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+        new SlashCommandBuilder()
+            .setName('ai-symbol')
+            .setDescription('Set the symbol that triggers AI responses! ✨')
+            .addStringOption(option =>
+                option.setName('symbol')
+                    .setDescription('Symbol to trigger AI (e.g., !, ?, @)')
+                    .setRequired(true)
+                    .setMaxLength(5))
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+        new SlashCommandBuilder()
+            .setName('ai-status')
+            .setDescription('Check AI current settings! 💖'),
+
+        new SlashCommandBuilder()
+            .setName('ai-reset')
+            .setDescription('Reset all AI settings to default! 🔄')
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
         new SlashCommandBuilder()
             .setName('ai-clear')
             .setDescription('Clear your conversation history with AI! 🧹💕'),
+
         new SlashCommandBuilder()
             .setName('ai-game')
             .setDescription('Start a conversation game with AI! 🎮💖')
@@ -990,7 +973,7 @@ module.exports = {
                     ))
     ],
 
-    // ✅ COMPLETE INTERACTION HANDLER (Same as before but with personality support)
+    // ✅ FIXED INTERACTION HANDLER
     async execute(interaction, client) {
         const lockKey = `ai_interaction_${interaction.id}`;
         if (client.processingLocks?.has(lockKey)) {
@@ -1015,10 +998,11 @@ module.exports = {
         }
 
         const { commandName } = interaction;
-        const subcommand = interaction.options?.getSubcommand?.() || null;
 
         try {
+            // ✅ FIXED: Handle main ai command with subcommands
             if (commandName === 'ai') {
+                const subcommand = interaction.options.getSubcommand();
                 switch (subcommand) {
                     case 'toggle': 
                         await handleToggle(interaction, client); 
@@ -1040,46 +1024,63 @@ module.exports = {
                             content: '❌ Unknown AI subcommand! Please try again! 🎯' 
                         });
                 }
-            } else {
-                // Legacy command handling (same as before)
-                switch (commandName) {
-                    case 'ai-toggle': 
-                        const enabled = interaction.options.getBoolean('enabled');
-                        await client.db.setAISetting(interaction.guildId, 'ai_enabled', enabled ? 1 : 0);
-                        const embed = new EmbedBuilder()
-                            .setColor(enabled ? '#00FF00' : '#FF9900')
-                            .setTitle('🤖 AI Chat Settings')
-                            .setDescription(`AI chat has been **${enabled ? 'enabled! 🎉💕' : 'disabled! 🎯'}** for this server.`)
-                            .setTimestamp();
-                        await interaction.editReply({ embeds: [embed] });
-                        break;
-                    case 'ai-channel': 
-                        await handleChannel(interaction, client); 
-                        break;
-                    case 'ai-symbol': 
-                        await handleSymbol(interaction, client); 
-                        break;
-                    case 'ai-status': 
-                        await handleStatus(interaction, client); 
-                        break;
-                    case 'ai-reset': 
-                        await handleReset(interaction, client); 
-                        break;
-                    case 'ai-personality': 
-                        await handlePersonality(interaction, client); 
-                        break;
-                    case 'ai-clear': 
-                        await handleClear(interaction, client); 
-                        break;
-                    case 'ai-game': 
-                        await handleGame(interaction, client); 
-                        break;
-                    default:
-                        await interaction.editReply({ 
-                            content: '❌ Unknown AI command! Please try again! 🎯' 
-                        });
-                }
             }
+            // ✅ FIXED: Handle standalone legacy commands (NO subcommands expected)
+            else if (commandName === 'ai-personality') {
+                const personality = interaction.options.getString('type');
+                await client.db.setAISetting(interaction.guildId, 'ai_personality', personality);
+
+                const personalityDescriptions = {
+                    cheerful: '🌟 Yaaay! I\'m feeling super duper cheerful and bubbly now! Ready to spread sunshine, rainbows, and endless positivity, sweetie! 💕✨🌈',
+                    caring: '💕 Aww honey! I\'m in my sweetest and most caring mode now! Ready to give you all the virtual hugs and support you could ever need, darling! 🤗💖',
+                    playful: '😘 Hehe, feeling extra playful and flirty today~ Ready for some absolutely adorable and fun conversations, cutie! Let\'s have some giggly fun together! 💫💃',
+                    gentle: '🌸 *softly whispers* I\'m in my gentlest and most supportive mode now, sweet soul! Here to listen with the softest heart and give you all the peaceful vibes! 🌺💕',
+                    sassy: '💃 Yasss queen! Confident and sassy mode is now ACTIVATED! Ready to bring some serious sparkle, attitude, and fabulous energy to our chats, gorgeous! 🔥✨💅',
+                    sylus: '⚡ Switching to a more composed approach. Cool, calm, collected - that\'s the vibe now. Ready for some interesting conversations, friend. 🌟💯'
+                };
+
+                const embed = new EmbedBuilder()
+                    .setColor('#ff69b4')
+                    .setTitle('✨ Personality Updated - New Vibe Activated!')
+                    .setDescription(personalityDescriptions[personality])
+                    .setTimestamp();
+
+                await interaction.editReply({ embeds: [embed] });
+            }
+            else if (commandName === 'ai-toggle') {
+                const enabled = interaction.options.getBoolean('enabled');
+                await client.db.setAISetting(interaction.guildId, 'ai_enabled', enabled ? 1 : 0);
+                const embed = new EmbedBuilder()
+                    .setColor(enabled ? '#00FF00' : '#FF9900')
+                    .setTitle('🤖 AI Chat Settings')
+                    .setDescription(`AI chat has been **${enabled ? 'enabled! 🎉💕' : 'disabled! 🎯'}** for this server.`)
+                    .setTimestamp();
+                await interaction.editReply({ embeds: [embed] });
+            }
+            else if (commandName === 'ai-channel') {
+                await handleChannel(interaction, client);
+            }
+            else if (commandName === 'ai-symbol') {
+                await handleSymbol(interaction, client);
+            }
+            else if (commandName === 'ai-status') {
+                await handleStatus(interaction, client);
+            }
+            else if (commandName === 'ai-reset') {
+                await handleReset(interaction, client);
+            }
+            else if (commandName === 'ai-clear') {
+                await handleClear(interaction, client);
+            }
+            else if (commandName === 'ai-game') {
+                await handleGame(interaction, client);
+            }
+            else {
+                await interaction.editReply({ 
+                    content: '❌ Unknown AI command! Please try again! 🎯' 
+                });
+            }
+
             console.log('✅ [ai.js] Successfully processed command:', commandName);
         } catch (commandError) {
             console.error('❌ [ai.js] Error executing command:', commandName, commandError);

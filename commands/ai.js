@@ -123,7 +123,7 @@ async function getAISettings(client, guildId) {
         return {
             enabled: result?.ai_enabled || 0,
             channelId: result?.ai_channel_id || null,
-            triggerSymbol: result?.ai_trigger_symbol || '!',
+            triggerSymbol: result?.ai_trigger_symbol || ['!', '?', '@'], // Array of symbols
             personality: result?.ai_personality || 'cheerful'
         };
     } catch (error) {
@@ -131,12 +131,11 @@ async function getAISettings(client, guildId) {
         return {
             enabled: 0,
             channelId: null,
-            triggerSymbol: '!',
+            triggerSymbol: ['!', '?', '@'], // Array of symbols
             personality: 'cheerful'
         };
     }
 }
-
 function estimateTokens(text) {
     return Math.ceil(text.length / 4);
 }

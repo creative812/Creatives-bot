@@ -7,25 +7,29 @@ module.exports = {
     async execute(interaction, client) {
         console.log('🔄 interactionCreate.js Handler fired for:', interaction.customId || interaction.commandName);
 
-        // Handle slash commands
-        if (interaction.isChatInputCommand()) {
-            await handleSlashCommand(interaction, client);
-        }
-        // Handle button interactions
-        else if (interaction.isButton()) {
-            await handleButtonInteraction(interaction, client);
-        }
-        // Handle select menu interactions
-        else if (interaction.isStringSelectMenu()) {
-            await handleSelectMenuInteraction(interaction, client);
-        }
-        // Handle modal submissions
-        else if (interaction.isModalSubmit()) {
-            await handleModalSubmit(interaction, client);
-        }
-        // Handle autocomplete interactions
-        else if (interaction.isAutocomplete()) {
-            await handleAutocomplete(interaction, client);
+        try {
+            // Handle slash commands
+            if (interaction.isChatInputCommand()) {
+                await handleSlashCommand(interaction, client);
+            }
+            // Handle button interactions
+            else if (interaction.isButton()) {
+                await handleButtonInteraction(interaction, client);
+            }
+            // Handle select menu interactions
+            else if (interaction.isStringSelectMenu()) {
+                await handleSelectMenuInteraction(interaction, client);
+            }
+            // Handle modal submissions
+            else if (interaction.isModalSubmit()) {
+                await handleModalSubmit(interaction, client);
+            }
+            // Handle autocomplete interactions
+            else if (interaction.isAutocomplete()) {
+                await handleAutocomplete(interaction, client);
+            }
+        } catch (error) {
+            client.logger.error('Error in interactionCreate handler:', error);
         }
     }
 };
@@ -36,18 +40,18 @@ async function handleSlashCommand(interaction, client) {
 
     if (!command) {
         client.logger.warn(`Unknown slash command: ${interaction.commandName}`);
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('Unknown Command', 'This command is not recognized.')],
             ephemeral: true
         });
     }
 
-    // NEW: Check if command is disabled
+    // Check if command is disabled
     const disabledCommand = client.db.getDisabledCommand(interaction.guild.id, interaction.commandName);
     if (disabledCommand) {
         const disabledEmbed = EmbedManager.createErrorEmbed(
             '🔒 Command Disabled', 
-            `This command has been disabled by server administrators.`
+            'This command has been disabled by server administrators.'
         )
         .addFields(
             { name: '📝 Reason', value: disabledCommand.reason || 'No reason provided', inline: false },
@@ -56,7 +60,7 @@ async function handleSlashCommand(interaction, client) {
         )
         .setColor('#FF6B6B');
 
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [disabledEmbed],
             ephemeral: true
         });
@@ -74,20 +78,22 @@ async function handleSlashCommand(interaction, client) {
         )
         .setColor('#FF6B6B');
 
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [permissionEmbed],
             ephemeral: true
         });
     }
 
     // Rate limiting for slash commands
+    if (!client.cooldowns) client.cooldowns = new Map();
+
     const cooldownKey = `${interaction.user.id}-${interaction.commandName}`;
     const cooldownTime = command.cooldown || 3000; // Default 3 second cooldown
 
     if (client.cooldowns.has(cooldownKey)) {
         const remainingTime = Math.ceil((client.cooldowns.get(cooldownKey) - Date.now()) / 1000);
         if (remainingTime > 0) {
-            return interaction.reply({
+            return safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed(
                     '⏰ Cooldown Active',
                     `Please wait ${remainingTime} second(s) before using this command again.`
@@ -106,8 +112,8 @@ async function handleSlashCommand(interaction, client) {
 
         // Log command usage with enhanced details
         client.logger.logCommand(interaction.commandName, interaction.user, interaction.guild, {
-            options: interaction.options.data,
-            channel: interaction.channel.name
+            options: interaction.options?.data,
+            channel: interaction.channel?.name
         });
     } catch (error) {
         client.logger.error(`Error executing slash command ${interaction.commandName}:`, error);
@@ -123,14 +129,14 @@ async function handleSlashCommand(interaction, client) {
         .setColor('#FF0000');
 
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ embeds: [errorEmbed], ephemeral: true });
+            await safeReply(interaction, { embeds: [errorEmbed], ephemeral: true }, true);
         } else {
-            await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            await safeReply(interaction, { embeds: [errorEmbed], ephemeral: true });
         }
     }
 }
 
-// Handle autocomplete interactions - NEW
+// Handle autocomplete interactions
 async function handleAutocomplete(interaction, client) {
     const command = client.commands.get(interaction.commandName);
 
@@ -178,7 +184,7 @@ async function handleButtonInteraction(interaction, client) {
         }
         else {
             // Handle unknown button interactions with helpful message
-            await interaction.reply({
+            await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed(
                     '❓ Unknown Button', 
                     'This button interaction is not recognized or may have expired.'
@@ -189,7 +195,7 @@ async function handleButtonInteraction(interaction, client) {
     } catch (error) {
         client.logger.error('Error handling button interaction:', error);
         if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({
+            await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('💥 Button Error', 'An error occurred while processing your request.')],
                 ephemeral: true
             });
@@ -205,7 +211,7 @@ async function handleSelectMenuInteraction(interaction, client) {
         } else if (interaction.customId.startsWith('filter_')) {
             await handleFilterSelection(interaction, client);
         } else {
-            await interaction.reply({
+            await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('❓ Unknown Menu', 'This select menu interaction is not recognized.')],
                 ephemeral: true
             });
@@ -213,7 +219,7 @@ async function handleSelectMenuInteraction(interaction, client) {
     } catch (error) {
         client.logger.error('Error handling select menu interaction:', error);
         if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({
+            await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('💥 Menu Error', 'An error occurred while processing your selection.')],
                 ephemeral: true
             });
@@ -231,7 +237,7 @@ async function handleModalSubmit(interaction, client) {
         } else if (interaction.customId.startsWith('suggestion-')) {
             await handleSuggestionModal(interaction, client);
         } else {
-            await interaction.reply({
+            await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('❓ Unknown Modal', 'This modal submission is not recognized.')],
                 ephemeral: true
             });
@@ -239,7 +245,7 @@ async function handleModalSubmit(interaction, client) {
     } catch (error) {
         client.logger.error('Error handling modal submit:', error);
         if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({
+            await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('💥 Modal Error', 'An error occurred while processing your request.')],
                 ephemeral: true
             });
@@ -253,14 +259,14 @@ async function handleGiveawayEntry(interaction, client) {
     const giveaway = client.db.getGiveaway(messageId);
 
     if (!giveaway) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎁 Giveaway Not Found', 'This giveaway no longer exists.')],
             ephemeral: true
         });
     }
 
     if (giveaway.ended) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎁 Giveaway Ended', 'This giveaway has already ended.')],
             ephemeral: true
         });
@@ -268,7 +274,7 @@ async function handleGiveawayEntry(interaction, client) {
 
     // Check if giveaway has expired
     if (new Date(giveaway.ends_at) < new Date()) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎁 Giveaway Expired', 'This giveaway has expired.')],
             ephemeral: true
         });
@@ -284,10 +290,10 @@ async function handleGiveawayEntry(interaction, client) {
 
         const embed = EmbedManager.createGiveawayEmbed(giveaway, newEntryCount);
         await interaction.update({ embeds: [embed] });
-        await interaction.followUp({
+        await safeReply(interaction, {
             embeds: [EmbedManager.createSuccessEmbed('✅ Left Giveaway', 'You have successfully left the giveaway.')],
             ephemeral: true
-        });
+        }, true);
     } else {
         // Add entry
         client.db.addGiveawayEntry(giveaway.id, interaction.user.id);
@@ -295,10 +301,10 @@ async function handleGiveawayEntry(interaction, client) {
 
         const embed = EmbedManager.createGiveawayEmbed(giveaway, newEntryCount);
         await interaction.update({ embeds: [embed] });
-        await interaction.followUp({
+        await safeReply(interaction, {
             embeds: [EmbedManager.createSuccessEmbed('🎉 Entered Giveaway', 'You have successfully entered the giveaway!')],
             ephemeral: true
-        });
+        }, true);
     }
 }
 
@@ -307,7 +313,7 @@ async function handleCreateTicketButton(interaction, client) {
     const settings = client.db.getTicketSettings(interaction.guild.id);
 
     if (!settings) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎫 Ticket System Not Setup', 'The ticket system has not been configured for this server.')],
             ephemeral: true
         });
@@ -315,7 +321,7 @@ async function handleCreateTicketButton(interaction, client) {
 
     const category = interaction.guild.channels.cache.get(settings.category_id);
     if (!category) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎫 Category Not Found', 'The ticket category could not be found.')],
             ephemeral: true
         });
@@ -324,7 +330,7 @@ async function handleCreateTicketButton(interaction, client) {
     // Check if user already has an open ticket
     const existingTicket = client.db.getUserTicket(interaction.guild.id, interaction.user.id);
     if (existingTicket) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎫 Ticket Already Exists', `You already have an open ticket: <#${existingTicket.channel_id}>`)],
             ephemeral: true
         });
@@ -463,7 +469,7 @@ async function handleCreateTicketButton(interaction, client) {
             if (logChannel) {
                 const logEmbed = EmbedManager.createEmbed(
                     '🎫 New Ticket Created',
-                    `A new ticket has been created`,
+                    'A new ticket has been created',
                     null
                 ).addFields(
                     { name: '🆔 Ticket Number', value: `#${ticketNumber}`, inline: true },
@@ -488,7 +494,7 @@ async function handleCloseTicketButton(interaction, client) {
     const ticket = client.db.getTicketByChannel(interaction.channel.id);
 
     if (!ticket) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('❌ Not a Ticket', 'This button can only be used in ticket channels.')],
             ephemeral: true
         });
@@ -523,7 +529,7 @@ async function handleCloseTicketButton(interaction, client) {
     }
 
     if (!canClose) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🚫 Permission Denied', 'Only staff members or the ticket owner can close tickets.')],
             ephemeral: true
         });
@@ -553,14 +559,14 @@ async function handleClaimTicketButton(interaction, client) {
     const ticket = client.db.getTicketByChannel(interaction.channel.id);
 
     if (!ticket) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('❌ Not a Ticket', 'This button can only be used in ticket channels.')],
             ephemeral: true
         });
     }
 
     if (!PermissionManager.isHelper(interaction.member)) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🚫 Permission Denied', 'Only staff members can claim tickets.')],
             ephemeral: true
         });
@@ -568,7 +574,7 @@ async function handleClaimTicketButton(interaction, client) {
 
     if (ticket.claimed_by) {
         const claimedUser = await client.users.fetch(ticket.claimed_by).catch(() => null);
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed(
                 '⚠️ Already Claimed', 
                 `This ticket is already claimed by ${claimedUser ? claimedUser.tag : 'Unknown User'}`
@@ -586,7 +592,7 @@ async function handleClaimTicketButton(interaction, client) {
         { name: '⏰ Claimed At', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
     );
 
-    await interaction.reply({ embeds: [embed] });
+    await safeReply(interaction, { embeds: [embed] });
 
     // Update channel name to show claimed status
     try {
@@ -606,7 +612,7 @@ async function handleTicketCloseModal(interaction, client) {
     const ticket = client.db.getTicketByChannel(interaction.channel.id);
 
     if (!ticket) {
-        return interaction.reply({
+        return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('❌ Not a Ticket', 'This modal can only be used in ticket channels.')],
             ephemeral: true
         });
@@ -734,57 +740,67 @@ async function handleSelfRoleSelection(interaction, client) {
 
         const embed = EmbedManager.createSuccessEmbed('🎭 Roles Updated', description.trim());
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await safeReply(interaction, { embeds: [embed], ephemeral: true });
     } catch (error) {
         client.logger.error('Error updating self-roles:', error);
-        await interaction.reply({
+        await safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('💥 Error', 'Failed to update your roles. Please try again.')],
             ephemeral: true
         });
     }
 }
 
-// Additional handlers for new features
+// Placeholder handlers for future features
 async function handleLeaderboardPagination(interaction, client) {
-    // Implementation for leaderboard pagination
-    const [action, direction] = interaction.customId.split('-').slice(1);
-    // Add your leaderboard pagination logic here
-    await interaction.reply({ content: 'Leaderboard pagination coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Leaderboard pagination coming soon!', ephemeral: true });
 }
 
 async function handleUserProfilePagination(interaction, client) {
-    // Implementation for user profile pagination
-    await interaction.reply({ content: 'User profile pagination coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'User profile pagination coming soon!', ephemeral: true });
 }
 
 async function handleWarnConfirmation(interaction, client) {
-    // Implementation for warning confirmations
-    await interaction.reply({ content: 'Warning confirmation coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Warning confirmation coming soon!', ephemeral: true });
 }
 
 async function handleMuteConfirmation(interaction, client) {
-    // Implementation for mute confirmations
-    await interaction.reply({ content: 'Mute confirmation coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Mute confirmation coming soon!', ephemeral: true });
 }
 
 async function handleRoleButton(interaction, client) {
-    // Implementation for role buttons
-    await interaction.reply({ content: 'Role button handling coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Role button handling coming soon!', ephemeral: true });
 }
 
 async function handleFilterSelection(interaction, client) {
-    // Implementation for filter selections
-    await interaction.reply({ content: 'Filter selection coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Filter selection coming soon!', ephemeral: true });
 }
 
 async function handleReportModal(interaction, client) {
-    // Implementation for report modals
-    await interaction.reply({ content: 'Report modal coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Report modal coming soon!', ephemeral: true });
 }
 
 async function handleSuggestionModal(interaction, client) {
-    // Implementation for suggestion modals
-    await interaction.reply({ content: 'Suggestion modal coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Suggestion modal coming soon!', ephemeral: true });
+}
+
+// Safe reply function to handle interaction states
+async function safeReply(interaction, options, isFollowUp = false) {
+    try {
+        if (interaction.replied || interaction.deferred) {
+            if (interaction.isRepliable() && !isFollowUp) {
+                return await interaction.followUp(options);
+            } else if (isFollowUp) {
+                return await interaction.followUp(options);
+            }
+        } else {
+            return await interaction.reply(options);
+        }
+    } catch (error) {
+        if (error.code !== RESTJSONErrorCodes.UnknownInteraction) {
+            console.error('Error in safeReply:', error.code, error.message);
+        }
+        return null;
+    }
 }
 
 // Helper functions

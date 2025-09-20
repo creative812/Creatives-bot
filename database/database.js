@@ -16,10 +16,10 @@ const dbPath = path.join(dataDir, 'bot.db');
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
-// Initialize all necessary tables and ensure columns exist, including safe migrations
+// Initialize all necessary tables
 const initTables = () => {
     try {
-        // Guild settings table - UPDATED WITH AI FIELDS AND COMMAND MANAGEMENT
+        // Guild settings table - WITH CORRECT COLUMN NAMES
         db.exec(`
             CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id TEXT PRIMARY KEY,
@@ -42,7 +42,7 @@ const initTables = () => {
             )
         `);
 
-        // NEW: Disabled commands table for command management
+        // Disabled commands table
         db.exec(`
             CREATE TABLE IF NOT EXISTS disabled_commands (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +55,7 @@ const initTables = () => {
             )
         `);
 
-        // Channel messages table for AI memory (stores last 100 messages per channel)
+        // Channel messages table for AI memory
         db.exec(`
             CREATE TABLE IF NOT EXISTS channel_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,10 +69,9 @@ const initTables = () => {
             )
         `);
 
-        // Add index for better performance
         db.exec(`CREATE INDEX IF NOT EXISTS idx_channel_timestamp ON channel_messages(channel_id, timestamp)`);
 
-        // Generic settings table for key-value pairs (level channel, messages, etc.)
+        // Generic settings table
         db.exec(`
             CREATE TABLE IF NOT EXISTS settings (
                 guild_id TEXT NOT NULL,
@@ -83,7 +82,7 @@ const initTables = () => {
             )
         `);
 
-        // Users table for leveling (EXP, level, messages)
+        // Users table for leveling
         db.exec(`
             CREATE TABLE IF NOT EXISTS users (
                 guild_id TEXT NOT NULL,
@@ -97,7 +96,7 @@ const initTables = () => {
             )
         `);
 
-        // Roles table to assign roles by level
+        // Roles table
         db.exec(`
             CREATE TABLE IF NOT EXISTS roles (
                 guild_id TEXT NOT NULL,
@@ -222,7 +221,7 @@ const initTables = () => {
             )
         `);
 
-        // Migration fixes - safely add missing columns if not present
+        // Safe column additions for migrations
         const addColumnIfNotExists = (table, column, definition) => {
             try {
                 const columns = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -231,15 +230,13 @@ const initTables = () => {
                     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
                 }
             } catch (error) {
-                // Column might already exist or table doesn't exist
+                // Column might already exist
             }
         };
 
-        // Add missing columns for existing databases
+        // Migration additions
         addColumnIfNotExists('ticket_settings', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
         addColumnIfNotExists('ticket_settings', 'staff_role_ids', 'TEXT');
-
-        // AI COLUMNS MIGRATION - Add these for existing databases
         addColumnIfNotExists('guild_settings', 'ai_enabled', 'INTEGER DEFAULT 0');
         addColumnIfNotExists('guild_settings', 'ai_channel_id', 'TEXT');
         addColumnIfNotExists('guild_settings', 'ai_trigger_symbol', 'TEXT DEFAULT "!"');
@@ -255,9 +252,9 @@ const initTables = () => {
 
 initTables();
 
-// Prepared SQL statements for all features (leveling, tickets, giveaways, moderation, etc.)
+// Prepared statements with CORRECT SYNTAX
 const statements = {
-    // Guild settings - UPDATED TO INCLUDE AI FIELDS AND COMMAND MANAGEMENT
+    // Guild settings
     getGuildSettings: db.prepare(`SELECT * FROM guild_settings WHERE guild_id = ?`),
     setGuildSettings: db.prepare(`
         INSERT OR REPLACE INTO guild_settings 
@@ -267,7 +264,7 @@ const statements = {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
-    // Command management statements - NEW
+    // Command management
     disableCommand: db.prepare(`
         INSERT OR REPLACE INTO disabled_commands 
         (guild_id, command_name, disabled_by, reason) 
@@ -286,7 +283,7 @@ const statements = {
         WHERE guild_id = ?
     `),
 
-    // Channel messages for AI memory
+    // Channel messages for AI
     addChannelMessage: db.prepare(`
         INSERT INTO channel_messages 
         (channel_id, user_id, username, message_content, is_ai_response, timestamp) 
@@ -307,7 +304,6 @@ const statements = {
             LIMIT 100
         )
     `),
-    getChannelMessageCount: db.prepare(`SELECT COUNT(*) as count FROM channel_messages WHERE channel_id = ?`),
     clearChannelHistory: db.prepare(`DELETE FROM channel_messages WHERE channel_id = ?`),
 
     // Settings
@@ -315,7 +311,7 @@ const statements = {
     getSetting: db.prepare(`SELECT value FROM settings WHERE guild_id = ? AND key = ?`),
     deleteSetting: db.prepare(`DELETE FROM settings WHERE guild_id = ? AND key = ?`),
 
-    // User leveling system
+    // User leveling
     getUser: db.prepare(`SELECT * FROM users WHERE guild_id = ? AND user_id = ?`),
     createUser: db.prepare(`
         INSERT OR IGNORE INTO users (guild_id, user_id, exp, lvl, messages) 
@@ -432,18 +428,17 @@ const statements = {
     removeSelfRole: db.prepare(`DELETE FROM self_roles WHERE guild_id = ? AND role_id = ?`),
     getSelfRoles: db.prepare(`SELECT * FROM self_roles WHERE guild_id = ?`),
 
-    // Ticket system
+    // Ticket system - FIXED getNextTicketNumber
     getTicketSettings: db.prepare(`SELECT * FROM ticket_settings WHERE guild_id = ?`),
     setTicketSettings: db.prepare(`
         INSERT OR REPLACE INTO ticket_settings 
         (guild_id, category_id, staff_role_ids, log_channel_id, next_ticket_number, updated_at) 
         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
-    getNextTicketNumber: db.prepare(`
+    incrementTicketNumber: db.prepare(`
         UPDATE ticket_settings 
         SET next_ticket_number = next_ticket_number + 1 
-        WHERE guild_id = ? 
-        RETURNING next_ticket_number - 1
+        WHERE guild_id = ?
     `),
     createTicket: db.prepare(`
         INSERT INTO tickets (guild_id, user_id, channel_id, ticket_number, reason) 
@@ -466,34 +461,18 @@ const statements = {
         WHERE id = ?
     `),
 
-    // Cleanup operations
+    // Cleanup
     cleanupOldData: db.prepare(`
         DELETE FROM mod_logs 
         WHERE created_at < date('now', '-30 days')
     `)
 };
 
-// Backup system
-const backup = () => {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupPath = path.join(dataDir, `backup-${timestamp}.db`);
-
-    try {
-        // Create a backup using SQLite VACUUM INTO command
-        db.exec(`VACUUM INTO '${backupPath}'`);
-        return backupPath;
-    } catch (error) {
-        Logger.error('Error creating backup:', error);
-        throw error;
-    }
-};
-
-// Export database instance and prepared statements
+// Export functions
 module.exports = {
     db,
-    backup,
 
-    // Command management functions - NEW
+    // Command management functions
     disableCommand: (guildId, commandName, disabledBy, reason) => {
         return statements.disableCommand.run(guildId, commandName, disabledBy, reason);
     },
@@ -523,7 +502,7 @@ module.exports = {
         );
     },
 
-    // Channel message functions for AI
+    // Channel message functions
     addChannelMessage: (channelId, userId, username, messageContent, isAiResponse, timestamp) => {
         statements.addChannelMessage.run(channelId, userId, username, messageContent, isAiResponse || 0, timestamp);
         statements.cleanOldChannelMessages.run(channelId, channelId);
@@ -612,14 +591,22 @@ module.exports = {
     removeSelfRole: (guildId, roleId) => statements.removeSelfRole.run(guildId, roleId),
     getSelfRoles: (guildId) => statements.getSelfRoles.all(guildId),
 
-    // Ticket functions
+    // Ticket functions - FIXED getNextTicketNumber
     getTicketSettings: (guildId) => statements.getTicketSettings.get(guildId),
     setTicketSettings: (guildId, categoryId, staffRoleIds, logChannelId, nextTicketNumber) => {
         return statements.setTicketSettings.run(guildId, categoryId, staffRoleIds, logChannelId, nextTicketNumber);
     },
     getNextTicketNumber: (guildId) => {
-        const result = statements.getNextTicketNumber.get(guildId);
-        return result?.next_ticket_number || 1;
+        // Get current number, then increment
+        const settings = statements.getTicketSettings.get(guildId);
+        if (!settings) {
+            // Create default settings if none exist
+            statements.setTicketSettings.run(guildId, null, null, null, 1);
+            return 1;
+        }
+        const currentNumber = settings.next_ticket_number || 1;
+        statements.incrementTicketNumber.run(guildId);
+        return currentNumber;
     },
     createTicket: (guildId, userId, channelId, ticketNumber, reason) => {
         const result = statements.createTicket.run(guildId, userId, channelId, ticketNumber, reason);

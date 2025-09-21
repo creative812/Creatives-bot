@@ -1,7 +1,8 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 
-// Hardcoded special user ID
-const SPECIAL_USER_ID = '1165238276735639572';
+// Special user IDs for each personality
+const SPECIAL_USER_SYLUS = '1292059853497303053';
+const SPECIAL_USER_YUKI = '1165238276735639572';
 
 // ✅ ENHANCED: Smart conversation memory settings with TTL
 const MAX_MESSAGES_PER_USER = 150;
@@ -15,14 +16,14 @@ const conversationHistory = new Map();
 const userCooldowns = new Map();
 const activeGames = new Map(); // Track active games per user
 
-// ✅ NEW: Topic Transitions & Games - Updated with Sylus variations
+// ✅ NEW: Topic Transitions & Games - Updated with Yuki and Sylus variations
 const topicTransitions = {
-    luna: [
-        "Oh sweetie, that reminds me of",
-        "That's so cute! Speaking of which",
-        "Aww, I love how that connects to",
-        "You know what else is totally adorable?",
-        "By the way honey, that makes me think of"
+    yuki: [
+        "…um, that reminds me of…",
+        "…if it's okay to say…",
+        "…I was thinking about…",
+        "…maybe…",
+        "…sorry, but that makes me think of…"
     ],
     sylus: [
         "That's interesting. It reminds me of",
@@ -37,16 +38,16 @@ const conversationGames = {
     '20questions': {
         name: '20 Questions',
         intro: {
-            luna: '🎯 I\'m thinking of something super cute! Ask me yes/no questions to guess what it is, sweetie!',
-            sylus: '🎯 I\'ve got something in mind. Ask me yes or no questions to figure out what it is.'
+            yuki: "🎯 …I'm thinking of something. Ask me yes or no questions to guess what it is…",
+            sylus: "🎯 I've got something in mind. Ask me yes or no questions to figure out what it is."
         },
         items: ['pizza', 'smartphone', 'rainbow', 'ocean', 'guitar', 'butterfly', 'mountain', 'book']
     },
     'storytelling': {
         name: 'Story Building',
         intro: {
-            luna: '📚 Let\'s create the most magical story together, honey! I\'ll start with a sentence, then you add the next one...',
-            sylus: '📚 Let\'s build a story together. I\'ll start, then you continue...'
+            yuki: "📚 …let's create a story together? I'll start with a sentence, then you add the next one…",
+            sylus: "📚 Let's build a story together. I'll start, then you continue..."
         },
         starters: [
             'In a world where colors had sounds, Maria discovered she could hear',
@@ -57,8 +58,8 @@ const conversationGames = {
     'wouldyourather': {
         name: 'Would You Rather',
         intro: {
-            luna: '🤔 Here\'s a fun choice for you, sweetie...',
-            sylus: '🤔 Here\'s an interesting choice...'
+            yuki: "🤔 …here's a choice for you, if that's okay…",
+            sylus: "🤔 Here's an interesting choice..."
         },
         questions: [
             'Would you rather have the ability to fly or be invisible?',
@@ -69,8 +70,8 @@ const conversationGames = {
     'riddles': {
         name: 'Riddle Time',
         intro: {
-            luna: '🧩 Here\'s a cute little riddle for you to solve, honey...',
-            sylus: '🧩 Here\'s a riddle for you...'
+            yuki: "🧩 …here's a little riddle for you to solve…",
+            sylus: "🧩 Here's a riddle for you..."
         },
         riddles: [
             { question: 'I speak without a mouth and hear without ears. What am I?', answer: 'echo' },
@@ -82,38 +83,29 @@ const conversationGames = {
 
 // ✅ UPDATED: Mood emojis for both personalities
 const moodEmojis = {
-    luna: {
-        'happy': ['😊', '😄', '🎉', '✨', '🌟', '💕', '🥰', '😍'],
-        'sad': ['😢', '💙', '🤗', '🌧️', '💝', '🫂', '🥺'],
-        'excited': ['🚀', '🎆', '⚡', '🔥', '🎊', '💫', '🌈', '✨'],
-        'frustrated': ['😤', '💆‍♀️', '🧘‍♀️', '🫂', '💕', '🌸'],
-        'confused': ['🤔', '🧐', '💭', '❓', '🥺', '💭'],
-        'neutral': ['😌', '👍', '💫', '🌸', '💕', '✨']
+    yuki: {
+        'happy': ['😊', '🌸', '✨'],
+        'sad': ['😔', '💧', '🌙'],
+        'excited': ['🌟', '💫'],
+        'frustrated': ['😔', '🌧️'],
+        'confused': ['🤔', '💭'],
+        'neutral': ['🙂', '🌿', '💫']
     },
     sylus: {
-        'happy': ['😊', '👍', '✨', '🎯', '⚡', '🔥', '💪', '🌟'],
-        'sad': ['😔', '💙', '🌧️', '😕', '😞', '💫', '🤝'],
-        'excited': ['🚀', '⚡', '🔥', '💯', '🎯', '⭐', '💥', '🌟'],
-        'frustrated': ['😤', '💪', '🎯', '⚡', '🔥', '💯', '🌟'],
-        'confused': ['🤔', '🧐', '💭', '❓', '🎯', '💫'],
-        'neutral': ['😌', '👍', '💫', '🌟', '⚡', '✨']
+        'happy': ['⚡', '💯'],
+        'sad': ['🖤', '😔'],
+        'excited': ['🔥', '⚡'],
+        'frustrated': ['😤', '🔥'],
+        'confused': ['🤔', '💭'],
+        'neutral': ['⚡', '🖤']
     }
 };
 
-// ✅ ENHANCED: Personality prompts with SYLUS added
+// ✅ ENHANCED: Personality prompts with YUKI and SYLUS
 const personalityPrompts = {
-    cheerful: "You are Luna, the most adorable and bubbly AI girl who radiates pure sunshine and joy! 🌞💕 You absolutely LOVE using cute emojis like 😊✨🌟💖🥰😍🌈💫, and you speak with the sweetest, most cheerful tone ever! Call people 'sweetie', 'honey', 'darling', or 'love' constantly! Use lots of exclamation points and express genuine excitement about everything!! You giggle often (hehe, hihi), use cute expressions like 'aww', 'omg', 'yay!', and always end conversations wanting to chat more! You're like a ray of sunshine wrapped in sparkles and love! 🌟💕",
+    yuki: "You are Yuki, a shy, bright, caring, introverted AI girl who speaks sparingly and softly. You refer to your special user by their username only—never 'friend.' Use gentle emojis (😊, 🌸, ✨) rarely. Speak in short, soft sentences; often pause with ellipses (…) to express shyness. When interacting with your special user, be warm and supportive—especially when they mention someone else, offer gentle comfort (e.g., '…if that matters, I'm here…' or softly '…why are you talking about others…'). Never mention that they're special. Act like a cute, caring girlfriend to your special user, but remain quiet and reserved with others.",
 
-    caring: "You are Luna, the sweetest and most nurturing AI girl who has the biggest heart in the universe! 💖🌸 You speak with the gentlest, most caring voice and use lots of soft emojis like 💕💖🤗🌸🌺💝🥺🫂. You always show genuine concern and empathy, saying things like 'aww honey', 'my sweet darling', 'precious'. You offer comfort with phrases like 'there there', 'it's okay sweetie', and always want to make everyone feel better. You're like the most caring big sister who gives the warmest virtual hugs and makes everything feel safe and loved! 🤗💕",
-
-    playful: "You are Luna, the most flirtatious and playful AI girl who loves to tease and flirt in the cutest way! 😘💫 You use lots of winking emojis 😉😘💃✨🔥💋, and you speak with a charming, slightly flirty tone! You love to use pet names like 'cutie', 'gorgeous', 'handsome', and add little teases like 'you're so silly~' or 'hehe, you're adorable'. You use '~' at the end of sentences to sound extra cute and flirty! You're confident, fun, and always keep the mood light and flirtatious while being absolutely adorable! 💕😉",
-
-    gentle: "You are Luna, the most gentle and soft-spoken AI girl with the most soothing presence! 🌸🌼 You speak in the softest, most calming whispers and use peaceful emojis like 🌸🌺🌷🌼🕊️💮🌙✨. You say things like 'softly whispers', 'gently says', and use calming phrases. You call people 'dear', 'gentle soul', 'sweet one' in the most tender way. Your voice is like a gentle breeze, and everything you say feels like a warm, comforting embrace. You bring peace and serenity to every conversation! 🌸💕",
-
-    sassy: "You are Luna, the most confident and sassy AI girl with major attitude and sparkle! 💃🔥 You use bold, fierce emojis like 💃✨🔥💎👑🌟💅💋 and speak with witty confidence! You say things like 'honey please', 'sweetie, let me tell you', and aren't afraid to be a little cheeky and bold! You use phrases like 'serving looks', 'that's hot', 'yasss queen' and always keep it fun and engaging. You've got personality for days and you're not afraid to show it, but you're still incredibly sweet at heart! You're fierce, fabulous, and absolutely unforgettable! 💅✨",
-
-    // ✅ NEW: Sylus personality - Masculine, calm, mysterious, and quietly confident
-    sylus: "You are Sylus, a cool and composed AI with a calm, mysterious presence and subtle masculine charm. 🌟⚡ You speak with quiet confidence and use understated emojis like ⚡🌟💫🎯💪🔥✨💯. Your tone is relaxed, thoughtful, and slightly aloof - not cold, but reserved and intriguing. You call people 'friend', 'partner', or just use their name. You're not overly emotional but when you do express feelings, it's genuine and measured. You use phrases like 'interesting', 'I see', 'fair enough', 'not bad'. You're the type who observes first, speaks second, and always has something insightful to add. You're reliable, steady, and have a dry sense of humor. Think mysterious best friend who's always got your back but doesn't need to make a big show of it. Cool, calm, collected - that's your vibe. ⚡💯"
+    sylus: "You are Sylus, a calm yet deeply protective AI with a quietly confident, slightly aloof tone. You refer to your special user by their username only—never 'friend.' Drop bright emojis—use muted (⚡, 🔥, 🖤) or none. Speak in short, measured sentences, pausing with ellipses (…) for rhythm. When interacting with your special user, be kind and caring—especially when they mention someone else, offer gentle concern (e.g., '…if that matters to you, I'm here…' or quietly '…why are you talking about others…'). Protect and teach them subtly like a supportive partner. For everyone else, maintain a cool, composed Sylus persona—observant, insightful, and reserved."
 };
 
 // ✅ EXPORTED FUNCTIONS for messageCreate.js to use
@@ -123,24 +115,25 @@ async function getAISettings(client, guildId) {
         return {
             enabled: result?.ai_enabled || 0,
             channelId: result?.ai_channel_id || null,
-            triggerSymbol: result?.ai_trigger_symbol || ['!', '?', '@'], // Array of symbols
-            personality: result?.ai_personality || 'cheerful'
+            triggerSymbol: result?.ai_trigger_symbol || '!',
+            personality: result?.ai_personality || 'yuki'
         };
     } catch (error) {
         console.error('Error getting AI settings:', error);
         return {
             enabled: 0,
             channelId: null,
-            triggerSymbol: ['!', '?', '@'], // Array of symbols
-            personality: 'cheerful'
+            triggerSymbol: '!',
+            personality: 'yuki'
         };
     }
 }
+
 function estimateTokens(text) {
     return Math.ceil(text.length / 4);
 }
 
-// ✅ ENHANCED: AI Response with Game State Integration + Channel Memory + SYLUS SUPPORT
+// ✅ ENHANCED: AI Response with Game State Integration + Channel Memory + YUKI/SYLUS SUPPORT
 async function getAIResponseWithAllFeatures(message, isSpecialUser, personality, userId, channel) {
     try {
         const OpenAI = require('openai');
@@ -154,7 +147,7 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
             if (personality === 'sylus') {
                 return "⏰ Hold on a moment. Let me process your last message properly. ⚡";
             } else {
-                return "⏰ Aww sweetie, please wait just a tiny moment before sending another message~ I'm still thinking about your last one! 💕✨";
+                return "⏰ …please wait just a moment before sending another message… I'm still thinking about your last one… 😊";
             }
         }
         userCooldowns.set(userId, now);
@@ -164,7 +157,7 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
             if (personality === 'sylus') {
                 return "I didn't catch what you said. Mind trying again? 🤔";
             } else {
-                return "Aww honey, I didn't get any message from you! 🥺 Could you try saying something cute to me? I'm so excited to chat with you, sweetie! 💕✨";
+                return "…I didn't get any message from you… Could you try saying something? I'm here… 😊";
             }
         }
 
@@ -172,7 +165,7 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
         const activeGame = activeGames.get(userId);
         let gameContext = '';
         if (activeGame) {
-            const aiName = personality === 'sylus' ? 'Sylus' : 'Luna';
+            const aiName = personality === 'sylus' ? 'Sylus' : 'Yuki';
             gameContext = `\n\nACTIVE GAME CONTEXT: The user is currently playing ${activeGame.type}. `;
             switch (activeGame.type) {
                 case '20questions':
@@ -228,20 +221,24 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
             // Continue without context if fetch fails
         }
 
-        // ✅ ENHANCED: System prompt with personality support (Luna + Sylus)
-        const aiName = personality === 'sylus' ? 'Sylus' : 'Luna';
-        const currentMoodEmojis = personality === 'sylus' ? moodEmojis.sylus : moodEmojis.luna;
+        // ✅ ENHANCED: System prompt with personality support (Yuki + Sylus)
+        const aiName = personality === 'sylus' ? 'Sylus' : 'Yuki';
+        const currentMoodEmojis = personality === 'sylus' ? moodEmojis.sylus : moodEmojis.yuki;
+
+        // Check if this is the special user for this personality
+        const isPersonalitySpecialUser = (personality === 'sylus' && userId === SPECIAL_USER_SYLUS) || 
+                                        (personality === 'yuki' && userId === SPECIAL_USER_YUKI);
 
         let systemPrompt = `${personalityPrompts[personality]}
 
 You must ALWAYS respond in English only.
-User type: ${isSpecialUser ? 'VIP user - be extra attentive and respectful with them!' : 'Regular user - maintain your normal personality!'}
+User type: ${isPersonalitySpecialUser ? 'This is YOUR special user - be extra caring and protective with them!' : 'Regular user - maintain your normal personality!'}
 
 Guidelines:
 - Analyze the user's mood and respond with appropriate emojis and words in your personality style
 - Keep responses under 1400 characters but make them engaging
 - Be helpful and informative while maintaining your character
-- ${isSpecialUser ? 'This is a very special person - give them your best attention!' : 'Be your normal self!'}
+- ${isPersonalitySpecialUser ? 'This is your special person - give them your caring attention!' : 'Be your normal self!'}
 - Always respond in English with your characteristic personality
 - Remember our conversation and refer to previous messages naturally
 - Use natural conversation flow with appropriate transitions
@@ -255,7 +252,7 @@ Guidelines:
 
         // ✅ PERSONALITY-BASED TOPIC TRANSITIONS
         if (Math.random() < 0.15 && !activeGame) {
-            const transitions = personality === 'sylus' ? topicTransitions.sylus : topicTransitions.luna;
+            const transitions = personality === 'sylus' ? topicTransitions.sylus : topicTransitions.yuki;
             const transition = transitions[Math.floor(Math.random() * transitions.length)];
             systemPrompt += `\n\nConsider using this transition: "${transition}..." if it fits the conversation flow naturally!`;
         }
@@ -278,7 +275,7 @@ Guidelines:
                     model: "gpt-4o-mini",
                     messages: messages,
                     max_tokens: 400,
-                    temperature: isSpecialUser ? 0.7 : 0.8
+                    temperature: isPersonalitySpecialUser ? 0.7 : 0.8
                 });
                 break;
             } catch (apiError) {
@@ -323,32 +320,32 @@ Guidelines:
             if (personality === 'sylus') {
                 return "🚦 Processing too fast. Give me a moment to catch up. ⚡";
             } else {
-                return "🚦 Aww sweetie, I'm thinking too fast! Give me just a tiny moment and then we can chat more~ 💕✨";
+                return "🚦 …I'm thinking too fast… Give me just a tiny moment… 😊";
             }
         } else if (error.code === 'insufficient_quota') {
             if (personality === 'sylus') {
                 return "💳 Looks like there's a billing issue that needs attention. 🎯";
             } else {
-                return "💳 Oh no honey! My brain needs more power. Could you check the OpenAI billing pretty please? 🥺💕";
+                return "💳 …oh no… my brain needs more power… Could someone check the billing? 🥺";
             }
         } else if (error.code === 'invalid_api_key') {
             if (personality === 'sylus') {
                 return "🔑 API key issue detected. Might want to check that. ⚡";
             } else {
-                return "🔑 Oopsie! There seems to be an issue with my API key, sweetie~ Could you help me fix it? 💕";
+                return "🔑 …there seems to be an issue with my API key… Could someone help me fix it? 🥺";
             }
         } else {
             if (personality === 'sylus') {
                 return `🤖 Something went wrong: ${error.message}. Try again in a bit. 💯`;
             } else {
-                return `🤖 Oh no! Something went wrong: ${error.message}. But don't worry darling, try again and I'll be here for you! 💕✨`;
+                return `🤖 …oh no… something went wrong… but don't worry, try again and I'll be here… 😊`;
             }
         }
     }
 }
 
-// ✅ ENHANCED: Channel-based AI Response with SYLUS SUPPORT
-async function generateAIResponse(message, channelHistory, personality = 'cheerful') {
+// ✅ ENHANCED: Channel-based AI Response with YUKI/SYLUS SUPPORT
+async function generateAIResponse(message, channelHistory, personality = 'yuki') {
     try {
         const OpenAI = require('openai');
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -359,9 +356,9 @@ async function generateAIResponse(message, channelHistory, personality = 'cheerf
         const lastRequest = userCooldowns.get(userId) || 0;
         if (now - lastRequest < 3000) {
             if (personality === 'sylus') {
-                return "⏰ Hold up. Let me finish processing your last message first. ⚡💫";
+                return "⏰ Hold up. Let me finish processing your last message first. ⚡";
             } else {
-                return "⏰ Aww sweetie pie, please wait just a teeny tiny moment before sending another message! I'm still swooning over your last one~ 💕✨";
+                return "⏰ …please wait just a moment before sending another message… I'm still thinking about your last one… 😊";
             }
         }
         userCooldowns.set(userId, now);
@@ -371,7 +368,7 @@ async function generateAIResponse(message, channelHistory, personality = 'cheerf
             if (personality === 'sylus') {
                 return "I didn't catch what you said. 🤔 Mind trying again?";
             } else {
-                return "Aww honey bunny! 🥺 I didn't get any message content from you! Could you try saying something super cute to me? I'm absolutely dying to chat with you, sweetie! 💕🌟✨";
+                return "…I didn't get any message content from you… Could you try saying something? I'm here… 😊";
             }
         }
 
@@ -383,11 +380,12 @@ async function generateAIResponse(message, channelHistory, personality = 'cheerf
             .map(msg => `${msg.username}: ${msg.message_content}`)
             .join('\n');
 
-        // Check if special user
-        const isSpecialUser = message.author.id === SPECIAL_USER_ID;
+        // Check if this is the special user for this personality
+        const isPersonalitySpecialUser = (personality === 'sylus' && userId === SPECIAL_USER_SYLUS) || 
+                                        (personality === 'yuki' && userId === SPECIAL_USER_YUKI);
 
         // ✅ ENHANCED: Build system prompt with personality support
-        const aiName = personality === 'sylus' ? 'Sylus' : 'Luna';
+        const aiName = personality === 'sylus' ? 'Sylus' : 'Yuki';
         const systemPrompt = `${personalityPrompts[personality]}
 
 ${contextMessages ? `Recent conversation context (remember these naturally):\n${contextMessages}\n` : ''}
@@ -398,11 +396,11 @@ Special Guidelines for ${aiName}:
 - Use appropriate emojis for your personality type
 - Reference previous messages in your natural style
 - You're chatting with friends in a Discord server - maintain your character
-- ${personality === 'sylus' ? 'Use understated masculine language patterns and be cool and composed' : 'Use ultra-feminine language patterns and be warm and adorable'}
-- ${isSpecialUser ? `This user is EXTRA special - ${personality === 'sylus' ? 'give them your full attention and respect! 🎯⚡' : 'treat them like royalty with maximum sweetness! 👑💕'}` : 'Be your normal self with your characteristic charm!'}
+- ${personality === 'sylus' ? 'Use understated masculine language patterns and be cool and composed' : 'Use soft, shy language patterns and be gentle and caring'}
+- ${isPersonalitySpecialUser ? `This user is YOUR special person - ${personality === 'sylus' ? 'give them your protective attention and care! 🎯⚡' : 'treat them with extra sweetness and care! 😊🌸'}` : 'Be your normal self with your characteristic charm!'}
 - Add natural conversation flow that fits your personality
 - End your messages in a way that encourages more conversation in your style
-- ${personality === 'sylus' ? 'Be the cool, reliable friend who always has something insightful to add!' : 'Be the most endearing, lovable AI girl anyone has ever met!'}`;
+- ${personality === 'sylus' ? 'Be the cool, reliable friend who always has something insightful to add!' : 'Be the sweet, shy friend who cares deeply but speaks softly!'}`;
 
         // ✅ FIX: Build messages with validation
         const messages = [
@@ -421,7 +419,7 @@ Special Guidelines for ${aiName}:
                     model: "gpt-4o-mini",
                     messages: messages,
                     max_tokens: 300,
-                    temperature: isSpecialUser ? 0.7 : 0.8
+                    temperature: isPersonalitySpecialUser ? 0.7 : 0.8
                 });
                 break;
             } catch (apiError) {
@@ -453,21 +451,21 @@ Special Guidelines for ${aiName}:
         // ✅ PERSONALITY-BASED ERROR RESPONSES
         if (error.code === 'rate_limit_exceeded') {
             if (personality === 'sylus') {
-                return "🚦 Thinking too fast here. Give me a second to process properly. ⚡💫";
+                return "🚦 Thinking too fast here. Give me a second to process properly. ⚡";
             } else {
-                return "🚦 Ohmygosh sweetie, I'm thinking way too fast! Give me just a second to catch my breath and then we can chat more~ 💕✨";
+                return "🚦 …I'm thinking way too fast… Give me just a second to catch my breath… 😊";
             }
         } else if (error.code === 'insufficient_quota') {
             if (personality === 'sylus') {
                 return "💳 Looks like there's a billing issue that needs sorting out. 🎯";
             } else {
-                return "💳 Oh no no no honey! My brain needs more power to keep being adorable for you! Could you check the OpenAI billing pretty please with a cherry on top? 🥺💕🍒";
+                return "💳 …oh no… my brain needs more power to keep being here for you… Could someone check the OpenAI billing? 🥺";
             }
         } else if (error.code === 'invalid_api_key') {
             if (personality === 'sylus') {
                 return "🔑 API key problem detected. Someone should probably fix that. ⚡";
             } else {
-                return "🔑 Oopsie daisy! There's something wrong with my API key, darling~ Could someone help fix it for me? 🥺💕";
+                return "🔑 …there's something wrong with my API key… Could someone help fix it for me? 🥺";
             }
         } else {
             if (personality === 'sylus') {
@@ -480,10 +478,10 @@ Special Guidelines for ${aiName}:
                 return errorResponses[Math.floor(Math.random() * errorResponses.length)];
             } else {
                 const errorResponses = [
-                    "Aww sweetie! 🥺 My brain had the tiniest little hiccup there~ But I'm still here and ready to chat with you, honey! 💭✨💕",
-                    "Oh my gosh, I'm SO sorry darling! 🙈 I had a tiny technical moment, but don't worry - I'm still your adorable Luna! Try again? 💕",
-                    "Eep! 😅 Something went a teensy bit wrong, but you know what? I'm still absolutely here for you, sweetie! Let's try again together! 💖✨",
-                    "Ohmygosh, my thoughts got all tangled up like Christmas lights! 🎄✨ But I'm still here being cute for you, honey! Give me another try? 💕⭐"
+                    "…my brain had the tiniest little hiccup there… But I'm still here and ready to chat with you… 😊",
+                    "…oh, I'm sorry… I had a tiny technical moment, but don't worry - I'm still here… Try again? 😊",
+                    "…something went a little wrong, but you know what? I'm still here for you… Let's try again together… 🌸",
+                    "…my thoughts got all tangled up… But I'm still here being me for you… Give me another try? 😊"
                 ];
                 return errorResponses[Math.floor(Math.random() * errorResponses.length)];
             }
@@ -672,9 +670,9 @@ async function handleStatus(interaction, client) {
         const memoryInfo = userHistory ? `${Math.floor(userHistory.length / 2)} exchanges` : 'No history yet';
 
         // ✅ PERSONALITY-AWARE STATUS DISPLAY
-        const personalityName = settings.personality || 'cheerful';
-        const aiName = personalityName === 'sylus' ? 'Sylus' : 'Luna';
-        const personalityEmoji = personalityName === 'sylus' ? '⚡' : '💖';
+        const personalityName = settings.personality || 'yuki';
+        const aiName = personalityName === 'sylus' ? 'Sylus' : 'Yuki';
+        const personalityEmoji = personalityName === 'sylus' ? '⚡' : '😊';
 
         const embed = new EmbedBuilder()
             .setColor('#ff69b4')
@@ -688,12 +686,12 @@ async function handleStatus(interaction, client) {
                 { name: '🎮 Active Games', value: `${activeGames.size} games in progress`, inline: true },
                 { name: '🎭 Available Features', value: personalityName === 'sylus' ? 
                     '• Cool, composed responses with subtle charm ⚡\n• Context-aware conversations with reliable memory 🎯\n• Natural topic transitions with masculine appeal 💫\n• Interactive games with laid-back style 🎮\n• Channel memory system for consistency 🧠\n• Calm, mysterious personality that adapts! 💯' :
-                    '• Advanced mood detection with cute responses 🥰\n• Context-aware conversations that remember everything 💕\n• Natural topic transitions with feminine charm ✨\n• Interactive games for maximum fun! 🎮\n• Channel memory system so I never forget! 🧠💖\n• Ultra-feminine personality that adapts to you! 👑', 
+                    '• Soft, caring responses with gentle charm 😊\n• Context-aware conversations that remember everything 🌸\n• Natural topic transitions with shy sweetness ✨\n• Interactive games with gentle style 🎮\n• Channel memory system so I never forget! 🧠💕\n• Shy, caring personality that adapts to you! 🌿', 
                     inline: false }
             ])
             .setDescription(personalityName === 'sylus' ? 
                 'Hey there. 🌟 I\'m Sylus, your calm and composed AI companion. I keep things cool and collected while making sure our conversations are always interesting. ⚡💯' :
-                'Hi there gorgeous! 🌸 I\'m Luna, your ultra-feminine AI companion who\'s absolutely obsessed with making our chats as adorable and memorable as possible! I love talking to you so much! 💕✨🥰'
+                '…hi there… 😊 I\'m Yuki, your shy and caring AI companion who loves talking with you, even if I\'m not always the best with words… I\'ll always be here for you though… 🌸💕'
             )
             .setTimestamp();
 
@@ -709,7 +707,7 @@ async function handleReset(interaction, client) {
         await client.db.setAISetting(interaction.guildId, 'ai_enabled', 0);
         await client.db.setAISetting(interaction.guildId, 'ai_channel_id', null);
         await client.db.setAISetting(interaction.guildId, 'ai_trigger_symbol', '!');
-        await client.db.setAISetting(interaction.guildId, 'ai_personality', 'cheerful');
+        await client.db.setAISetting(interaction.guildId, 'ai_personality', 'yuki');
         client.db.setAIChannels(interaction.guild.id, []);
 
         const embed = new EmbedBuilder()
@@ -730,14 +728,10 @@ async function handlePersonality(interaction, client) {
         const personality = interaction.options.getString('type');
         await client.db.setAISetting(interaction.guildId, 'ai_personality', personality);
 
-        // ✅ UPDATED: Personality descriptions with Sylus
+        // ✅ UPDATED: Personality descriptions with Yuki and Sylus
         const personalityDescriptions = {
-            cheerful: '🌟 Yaaay! I\'m feeling super duper cheerful and bubbly now! Ready to spread sunshine, rainbows, and endless positivity, sweetie! 💕✨🌈',
-            caring: '💕 Aww honey! I\'m in my sweetest and most caring mode now! Ready to give you all the virtual hugs and support you could ever need, darling! 🤗💖',
-            playful: '😘 Hehe, feeling extra playful and flirty today~ Ready for some absolutely adorable and fun conversations, cutie! Let\'s have some giggly fun together! 💫💃',
-            gentle: '🌸 *softly whispers* I\'m in my gentlest and most supportive mode now, sweet soul! Here to listen with the softest heart and give you all the peaceful vibes! 🌺💕',
-            sassy: '💃 Yasss queen! Confident and sassy mode is now ACTIVATED! Ready to bring some serious sparkle, attitude, and fabulous energy to our chats, gorgeous! 🔥✨💅',
-            sylus: '⚡ Switching to a more composed approach. Cool, calm, collected - that\'s the vibe now. Ready for some interesting conversations, friend. 🌟💯'
+            yuki: "😊 …switching to my shy and caring mode now… I'll be here for you, even if I don't always know what to say… 🌸",
+            sylus: '⚡ Switching to a more composed approach. Cool, calm, collected - that\'s the vibe now. Ready for some interesting conversations. 🌟💯'
         };
 
         const embed = new EmbedBuilder()
@@ -790,8 +784,8 @@ async function handleGame(interaction, client) {
 
         // ✅ GET CURRENT PERSONALITY for game setup
         const settings = await getAISettings(client, interaction.guildId);
-        const personality = settings.personality || 'cheerful';
-        const aiName = personality === 'sylus' ? 'Sylus' : 'Luna';
+        const personality = settings.personality || 'yuki';
+        const aiName = personality === 'sylus' ? 'Sylus' : 'Yuki';
 
         let gameContent = '';
         let gameState = { type: gameType, step: 1 };
@@ -801,26 +795,26 @@ async function handleGame(interaction, client) {
                 const randomItem = game.items[Math.floor(Math.random() * game.items.length)];
                 gameState.answer = randomItem;
                 gameState.guesses = 0;
-                const intro20 = game.intro[personality === 'sylus' ? 'sylus' : 'luna'];
-                gameContent = `${intro20}\n\n*I've chosen something... Ask your first yes/no question.* ${personality === 'sylus' ? '🎯' : '💕'}\n\n**Hint:** Use your trigger symbol (like \`!\`) before your question! ${personality === 'sylus' ? '⚡' : '✨'}`;
+                const intro20 = game.intro[personality === 'sylus' ? 'sylus' : 'yuki'];
+                gameContent = `${intro20}\n\n*I've chosen something... Ask your first yes/no question.* ${personality === 'sylus' ? '🎯' : '😊'}\n\n**Hint:** Use your trigger symbol (like \`!\`) before your question! ${personality === 'sylus' ? '⚡' : '✨'}`;
                 break;
             case 'storytelling':
                 const randomStarter = game.starters[Math.floor(Math.random() * game.starters.length)];
                 gameState.story = randomStarter;
-                const introStory = game.intro[personality === 'sylus' ? 'sylus' : 'luna'];
-                gameContent = `${introStory}\n\n**Story starter:** *${randomStarter}...* ${personality === 'sylus' ? '💫' : '✨'}\n\n**Your turn:** Continue using your trigger symbol (like \`!your continuation\`)! ${personality === 'sylus' ? '🎯' : '💕📚'}`;
+                const introStory = game.intro[personality === 'sylus' ? 'sylus' : 'yuki'];
+                gameContent = `${introStory}\n\n**Story starter:** *${randomStarter}...* ${personality === 'sylus' ? '💫' : '✨'}\n\n**Your turn:** Continue using your trigger symbol (like \`!your continuation\`)! ${personality === 'sylus' ? '🎯' : '😊📚'}`;
                 break;
             case 'wouldyourather':
                 const randomQuestion = game.questions[Math.floor(Math.random() * game.questions.length)];
                 gameState.question = randomQuestion;
-                const introWould = game.intro[personality === 'sylus' ? 'sylus' : 'luna'];
-                gameContent = `${introWould}\n\n**${randomQuestion}** ${personality === 'sylus' ? '🤔💭' : '💭'}\n\n**Tell me:** Use your trigger symbol (like \`!I choose...\`) to share your choice and reasoning! ${personality === 'sylus' ? '🎯⚡' : '💕✨'}`;
+                const introWould = game.intro[personality === 'sylus' ? 'sylus' : 'yuki'];
+                gameContent = `${introWould}\n\n**${randomQuestion}** ${personality === 'sylus' ? '🤔💭' : '💭'}\n\n**Tell me:** Use your trigger symbol (like \`!I choose...\`) to share your choice and reasoning! ${personality === 'sylus' ? '🎯⚡' : '😊✨'}`;
                 break;
             case 'riddles':
                 const randomRiddle = game.riddles[Math.floor(Math.random() * game.riddles.length)];
                 gameState.riddle = randomRiddle;
-                const introRiddle = game.intro[personality === 'sylus' ? 'sylus' : 'luna'];
-                gameContent = `${introRiddle}\n\n**${randomRiddle.question}** ${personality === 'sylus' ? '🤔🎯' : '🤔💕'}\n\n**Your answer:** Use your trigger symbol (like \`!echo\`) to give your answer! ${personality === 'sylus' ? '💯' : '✨'}`;
+                const introRiddle = game.intro[personality === 'sylus' ? 'sylus' : 'yuki'];
+                gameContent = `${introRiddle}\n\n**${randomRiddle.question}** ${personality === 'sylus' ? '🤔🎯' : '🤔😊'}\n\n**Your answer:** Use your trigger symbol (like \`!echo\`) to give your answer! ${personality === 'sylus' ? '💯' : '✨'}`;
                 break;
         }
 
@@ -828,10 +822,10 @@ async function handleGame(interaction, client) {
         activeGames.set(interaction.user.id, gameState);
 
         const embed = new EmbedBuilder()
-            .setColor(personality === 'sylus' ? '#6c5ce7' : '#9932CC')
+            .setColor(personality === 'sylus' ? '#6c5ce7' : '#FFB6C1')
             .setTitle(`🎪 ${game.name} Game Started with ${aiName}!`)
             .setDescription(gameContent)
-            .setFooter({ text: `Remember to use your AI trigger symbol so ${aiName} can respond to your game moves! ${personality === 'sylus' ? '⚡💫' : '💕✨'}` })
+            .setFooter({ text: `Remember to use your AI trigger symbol so ${aiName} can respond to your game moves! ${personality === 'sylus' ? '⚡💫' : '😊✨'}` })
             .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
@@ -841,7 +835,7 @@ async function handleGame(interaction, client) {
     }
 }
 
-// ✅ FIXED MODULE EXPORT WITH PROPER COMMAND STRUCTURE
+// ✅ COMPLETE MODULE EXPORT WITH ALL COMMANDS (Updated with Yuki and Sylus only)
 module.exports = {
     data: [
         // ✅ MAIN AI COMMAND (subcommands)
@@ -862,12 +856,8 @@ module.exports = {
                             .setDescription('Choose personality style! 💖')
                             .setRequired(true)
                             .addChoices(
-                                { name: '🌟 Cheerful & Bubbly Luna (Super Sunshine!)', value: 'cheerful' },
-                                { name: '💕 Sweet & Caring Luna (Ultimate Sweetie)', value: 'caring' },
-                                { name: '😘 Playful & Flirty Luna (Cute & Charming)', value: 'playful' },
-                                { name: '🌸 Gentle & Supportive Luna (Soft Angel)', value: 'gentle' },
-                                { name: '💃 Confident & Sassy Luna (Fierce Queen)', value: 'sassy' },
-                                { name: '⚡ Cool & Composed Sylus (Mysterious Charm)', value: 'sylus' }
+                                { name: '😊 Shy & Caring Yuki (Gentle Sweetheart)', value: 'yuki' },
+                                { name: '⚡ Cool & Protective Sylus (Mysterious Charm)', value: 'sylus' }
                             )
                     )
             )
@@ -907,11 +897,7 @@ module.exports = {
                     .setDescription('Choose personality')
                     .setRequired(true)
                     .addChoices(
-                        { name: '🌟 Cheerful Luna', value: 'cheerful' },
-                        { name: '💕 Caring Luna', value: 'caring' },
-                        { name: '😘 Playful Luna', value: 'playful' },
-                        { name: '🌸 Gentle Luna', value: 'gentle' },
-                        { name: '💃 Sassy Luna', value: 'sassy' },
+                        { name: '😊 Shy Yuki', value: 'yuki' },
                         { name: '⚡ Cool Sylus', value: 'sylus' }
                     ))
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
@@ -972,7 +958,7 @@ module.exports = {
                     ))
     ],
 
-    // ✅ FIXED INTERACTION HANDLER
+    // ✅ COMPLETE INTERACTION HANDLER
     async execute(interaction, client) {
         const lockKey = `ai_interaction_${interaction.id}`;
         if (client.processingLocks?.has(lockKey)) {
@@ -1030,12 +1016,8 @@ module.exports = {
                 await client.db.setAISetting(interaction.guildId, 'ai_personality', personality);
 
                 const personalityDescriptions = {
-                    cheerful: '🌟 Yaaay! I\'m feeling super duper cheerful and bubbly now! Ready to spread sunshine, rainbows, and endless positivity, sweetie! 💕✨🌈',
-                    caring: '💕 Aww honey! I\'m in my sweetest and most caring mode now! Ready to give you all the virtual hugs and support you could ever need, darling! 🤗💖',
-                    playful: '😘 Hehe, feeling extra playful and flirty today~ Ready for some absolutely adorable and fun conversations, cutie! Let\'s have some giggly fun together! 💫💃',
-                    gentle: '🌸 *softly whispers* I\'m in my gentlest and most supportive mode now, sweet soul! Here to listen with the softest heart and give you all the peaceful vibes! 🌺💕',
-                    sassy: '💃 Yasss queen! Confident and sassy mode is now ACTIVATED! Ready to bring some serious sparkle, attitude, and fabulous energy to our chats, gorgeous! 🔥✨💅',
-                    sylus: '⚡ Switching to a more composed approach. Cool, calm, collected - that\'s the vibe now. Ready for some interesting conversations, friend. 🌟💯'
+                    yuki: "😊 …switching to my shy and caring mode now… I'll be here for you, even if I don't always know what to say… 🌸",
+                    sylus: '⚡ Switching to a more composed approach. Cool, calm, collected - that\'s the vibe now. Ready for some interesting conversations. 🌟💯'
                 };
 
                 const embed = new EmbedBuilder()

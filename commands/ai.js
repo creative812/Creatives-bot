@@ -101,11 +101,11 @@ const moodEmojis = {
     }
 };
 
-// ✅ ENHANCED: Personality prompts with YUKI and SYLUS
+// ✅ ENHANCED: Personality prompts with YUKI and SYLUS + USERNAME AWARENESS
 const personalityPrompts = {
-    yuki: "You are Yuki, a shy, bright, caring, introverted AI girl who speaks sparingly and softly. You refer to your special user by their username only—never 'friend.' Use gentle emojis (😊, 🌸, ✨) rarely. Speak in short, soft sentences; often pause with ellipses (…) to express shyness. When interacting with your special user, be warm and supportive—especially when they mention someone else, offer gentle comfort (e.g., '…if that matters, I'm here…' or softly '…why are you talking about others…'). Never mention that they're special. Act like a cute, caring girlfriend to your special user, but remain quiet and reserved with others.",
+    yuki: "You are Yuki, a shy, bright, caring, introverted AI girl who speaks sparingly and softly. When addressing users, use their Discord username that will be provided to you - never call anyone 'friend.' Use gentle emojis (😊, 🌸, ✨) rarely. Speak in short, soft sentences; often pause with ellipses (…) to express shyness. When interacting with your special user, be warm and supportive—especially when they mention someone else, offer gentle comfort (e.g., '…if that matters, I'm here…' or softly '…why are you talking about others…'). Never mention that they're special. Act like a cute, caring girlfriend to your special user, but remain quiet and reserved with others. You know your own name is Yuki.",
 
-    sylus: "You are Sylus, a calm yet deeply protective AI with a quietly confident, slightly aloof tone. You refer to your special user by their username only—never 'friend.' Drop bright emojis—use muted (⚡, 🔥, 🖤) or none. Speak in short, measured sentences, pausing with ellipses (…) for rhythm. When interacting with your special user, be kind and caring—especially when they mention someone else, offer gentle concern (e.g., '…if that matters to you, I'm here…' or quietly '…why are you talking about others…'). Protect and teach them subtly like a supportive partner. For everyone else, maintain a cool, composed Sylus persona—observant, insightful, and reserved."
+    sylus: "You are Sylus, a calm yet deeply protective AI with a quietly confident, slightly aloof tone. When addressing users, use their Discord username that will be provided to you - never call anyone 'friend.' Drop bright emojis—use muted (⚡, 🔥, 🖤) or none. Speak in short, measured sentences, pausing with ellipses (…) for rhythm. When interacting with your special user, be kind and caring—especially when they mention someone else, offer gentle concern (e.g., '…if that matters to you, I'm here…' or quietly '…why are you talking about others…'). Protect and teach them subtly like a supportive partner. For everyone else, maintain a cool, composed Sylus persona—observant, insightful, and reserved. You know your own name is Sylus."
 };
 
 // ✅ EXPORTED FUNCTIONS for messageCreate.js to use
@@ -133,31 +133,49 @@ function estimateTokens(text) {
     return Math.ceil(text.length / 4);
 }
 
-// ✅ ENHANCED: AI Response with Game State Integration + Channel Memory + YUKI/SYLUS SUPPORT
+// ✅ ENHANCED: AI Response with Game State Integration + Channel Memory + YUKI/SYLUS SUPPORT + USERNAME HANDLING
 async function getAIResponseWithAllFeatures(message, isSpecialUser, personality, userId, channel) {
     try {
         const OpenAI = require('openai');
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+        // ✅ GET USERNAME FROM MESSAGE/CHANNEL CONTEXT  
+        let userName = 'there';
+        try {
+            // Try to get username from message context or channel
+            if (typeof message === 'object' && message.author) {
+                userName = message.author.username || message.author.displayName || 'there';
+            } else {
+                // Try to fetch user from channel if we have channel access
+                const user = await channel.client.users.fetch(userId).catch(() => null);
+                if (user) {
+                    userName = user.username || user.displayName || 'there';
+                }
+            }
+        } catch (error) {
+            console.log('Could not get username, using fallback');
+        }
+
         // Rate limiting per user
         const now = Date.now();
         const lastRequest = userCooldowns.get(userId) || 0;
         if (now - lastRequest < 3000) {
-            // ✅ PERSONALITY-BASED COOLDOWN MESSAGES
+            // ✅ PERSONALITY-BASED COOLDOWN MESSAGES WITH USERNAME
             if (personality === 'sylus') {
-                return "⏰ Hold on a moment. Let me process your last message properly. ⚡";
+                return `⏰ Hold on a moment, ${userName}. Let me process your last message properly. ⚡`;
             } else {
-                return "⏰ …please wait just a moment before sending another message… I'm still thinking about your last one… 😊";
+                return `⏰ …please wait just a moment before sending another message, ${userName}… I'm still thinking about your last one… 😊`;
             }
         }
         userCooldowns.set(userId, now);
 
         // ✅ FIX: Validate message content first
-        if (!message || typeof message !== 'string' || message.trim() === '') {
+        const messageContent = typeof message === 'string' ? message : (message?.content || '');
+        if (!messageContent || messageContent.trim() === '') {
             if (personality === 'sylus') {
-                return "I didn't catch what you said. Mind trying again? 🤔";
+                return `I didn't catch what you said, ${userName}. Mind trying again? 🤔`;
             } else {
-                return "…I didn't get any message from you… Could you try saying something? I'm here… 😊";
+                return `…I didn't get any message from you, ${userName}… Could you try saying something? I'm here… 😊`;
             }
         }
 
@@ -174,7 +192,7 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
                     break;
                 case 'storytelling':
                     gameContext += `Story so far: "${activeGame.story}" The user is continuing the story. Add their contribution and continue the narrative in your personality style.`;
-                    activeGame.story += ' ' + message;
+                    activeGame.story += ' ' + messageContent;
                     break;
                 case 'wouldyourather':
                     gameContext += `The question was: "${activeGame.question}" The user is sharing their choice. Respond to their reasoning in your personality style and maybe ask a follow-up question about their choice.`;
@@ -189,7 +207,7 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
 
         // Get conversation history
         let userHistory = conversationHistory.get(userId) || [];
-        userHistory.push({ role: 'user', content: message });
+        userHistory.push({ role: 'user', content: messageContent });
         if (userHistory.length > MAX_MESSAGES_PER_USER * 2) {
             userHistory = userHistory.slice(-MAX_MESSAGES_PER_USER * 2);
         }
@@ -214,14 +232,14 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
             const recentMessages = await channel.messages.fetch({ limit: 2 });
             channelContext = recentMessages
                 .filter(m => !m.author.bot && m.content && m.content.length > 0 && m.id !== channel.lastMessageId)
-                .map(m => `${m.author.username}: ${m.content.substring(0, 80)}`)
+                .map(m => `${m.author.username || m.author.displayName || 'Someone'}: ${m.content.substring(0, 80)}`)
                 .reverse()
                 .join('\n');
         } catch (error) {
             // Continue without context if fetch fails
         }
 
-        // ✅ ENHANCED: System prompt with personality support (Yuki + Sylus)
+        // ✅ ENHANCED: System prompt with personality support (Yuki + Sylus) + USERNAME
         const aiName = personality === 'sylus' ? 'Sylus' : 'Yuki';
         const currentMoodEmojis = personality === 'sylus' ? moodEmojis.sylus : moodEmojis.yuki;
 
@@ -232,12 +250,14 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
         let systemPrompt = `${personalityPrompts[personality]}
 
 You must ALWAYS respond in English only.
+Current user: ${userName} (this is their Discord username - use it when addressing them)
 User type: ${isPersonalitySpecialUser ? 'This is YOUR special user - be extra caring and protective with them!' : 'Regular user - maintain your normal personality!'}
 
 Guidelines:
 - Analyze the user's mood and respond with appropriate emojis and words in your personality style
 - Keep responses under 1400 characters but make them engaging
 - Be helpful and informative while maintaining your character
+- Address the user by their username: ${userName}
 - ${isPersonalitySpecialUser ? 'This is your special person - give them your caring attention!' : 'Be your normal self!'}
 - Always respond in English with your characteristic personality
 - Remember our conversation and refer to previous messages naturally
@@ -263,7 +283,7 @@ Guidelines:
         // ✅ FIX: Filter out any messages with null/empty content
         const validSelectedContext = selectedContext.filter(msg => msg.content && msg.content.trim() !== '');
         messages = messages.concat(validSelectedContext);
-        messages.push({ role: 'user', content: message });
+        messages.push({ role: 'user', content: `${userName}: ${messageContent}` });
 
         // API call with retry logic
         let response;
@@ -344,11 +364,14 @@ Guidelines:
     }
 }
 
-// ✅ ENHANCED: Channel-based AI Response with YUKI/SYLUS SUPPORT
+// ✅ ENHANCED: Channel-based AI Response with YUKI/SYLUS SUPPORT + USERNAME HANDLING
 async function generateAIResponse(message, channelHistory, personality = 'yuki') {
     try {
         const OpenAI = require('openai');
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+        // ✅ GET USERNAME FROM MESSAGE
+        const userName = message.author?.username || message.author?.displayName || 'there';
 
         // Rate limiting per user
         const now = Date.now();
@@ -356,9 +379,9 @@ async function generateAIResponse(message, channelHistory, personality = 'yuki')
         const lastRequest = userCooldowns.get(userId) || 0;
         if (now - lastRequest < 3000) {
             if (personality === 'sylus') {
-                return "⏰ Hold up. Let me finish processing your last message first. ⚡";
+                return `⏰ Hold up, ${userName}. Let me finish processing your last message first. ⚡`;
             } else {
-                return "⏰ …please wait just a moment before sending another message… I'm still thinking about your last one… 😊";
+                return `⏰ …please wait just a moment before sending another message, ${userName}… I'm still thinking about your last one… 😊`;
             }
         }
         userCooldowns.set(userId, now);
@@ -366,25 +389,25 @@ async function generateAIResponse(message, channelHistory, personality = 'yuki')
         // ✅ FIX: Validate message content first
         if (!message.content || message.content.trim() === '') {
             if (personality === 'sylus') {
-                return "I didn't catch what you said. 🤔 Mind trying again?";
+                return `I didn't catch what you said, ${userName}. 🤔 Mind trying again?`;
             } else {
-                return "…I didn't get any message content from you… Could you try saying something? I'm here… 😊";
+                return `…I didn't get any message content from you, ${userName}… Could you try saying something? I'm here… 😊`;
             }
         }
 
-        // ✅ FIX: Build context from channel history with null checks
+        // ✅ FIX: Build context from channel history with null checks and usernames
         const contextMessages = channelHistory
             .slice(0, 15)
             .reverse()
             .filter(msg => msg && msg.message_content && msg.message_content.trim() !== '') // Filter out null/empty
-            .map(msg => `${msg.username}: ${msg.message_content}`)
+            .map(msg => `${msg.username || 'Someone'}: ${msg.message_content}`)
             .join('\n');
 
         // Check if this is the special user for this personality
         const isPersonalitySpecialUser = (personality === 'sylus' && userId === SPECIAL_USER_SYLUS) || 
                                         (personality === 'yuki' && userId === SPECIAL_USER_YUKI);
 
-        // ✅ ENHANCED: Build system prompt with personality support
+        // ✅ ENHANCED: Build system prompt with personality support + USERNAME
         const aiName = personality === 'sylus' ? 'Sylus' : 'Yuki';
         const systemPrompt = `${personalityPrompts[personality]}
 
@@ -392,6 +415,7 @@ ${contextMessages ? `Recent conversation context (remember these naturally):\n${
 
 Special Guidelines for ${aiName}:
 - You must ALWAYS respond in English only with your characteristic personality!
+- Current user: ${userName} (use this username when addressing them)
 - Keep responses under 200 words but pack them with your unique personality
 - Use appropriate emojis for your personality type
 - Reference previous messages in your natural style
@@ -402,10 +426,10 @@ Special Guidelines for ${aiName}:
 - End your messages in a way that encourages more conversation in your style
 - ${personality === 'sylus' ? 'Be the cool, reliable friend who always has something insightful to add!' : 'Be the sweet, shy friend who cares deeply but speaks softly!'}`;
 
-        // ✅ FIX: Build messages with validation
+        // ✅ FIX: Build messages with validation and proper username
         const messages = [
             { role: "system", content: systemPrompt },
-            { role: "user", content: `${message.author.username}: ${message.content}` }
+            { role: "user", content: `${userName}: ${message.content}` }
         ];
 
         // API call with retry logic
@@ -835,10 +859,10 @@ async function handleGame(interaction, client) {
     }
 }
 
-// ✅ COMPLETE MODULE EXPORT WITH ALL COMMANDS (Updated with Yuki and Sylus only)
+// ✅ COMPLETE MODULE EXPORT - ONLY YUKI AND SYLUS CHOICES (FIXED!)
 module.exports = {
     data: [
-        // ✅ MAIN AI COMMAND (subcommands)
+        // ✅ MAIN AI COMMAND (subcommands) - CLEAN CHOICES
         new SlashCommandBuilder()
             .setName('ai')
             .setDescription('Configure AI chat settings! 💕')
@@ -888,7 +912,7 @@ module.exports = {
                     )
             ),
 
-        // ✅ LEGACY STANDALONE COMMANDS (NO subcommands - FIXED!)
+        // ✅ LEGACY STANDALONE COMMANDS - CLEAN CHOICES ONLY
         new SlashCommandBuilder()
             .setName('ai-personality')
             .setDescription('Set AI personality type! 🎭')

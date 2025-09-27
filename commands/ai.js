@@ -144,12 +144,12 @@ async function getAIResponseWithAllFeatures(message, isSpecialUser, personality,
         try {
             // Try to get username from message context or channel
             if (typeof message === 'object' && message.author) {
-                userName = message.author.username || message.author.displayName || 'there';
+                userName = message.author.displayName || message.author.username || 'there';
             } else {
                 // Try to fetch user from channel if we have channel access
                 const user = await channel.client.users.fetch(userId).catch(() => null);
                 if (user) {
-                    userName = user.username || user.displayName || 'there';
+                    userName = user.displayName || user.username || 'there';
                 }
             }
         } catch (error) {
@@ -371,7 +371,7 @@ async function generateAIResponse(message, channelHistory, personality = 'yuki')
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
         // ✅ GET USERNAME FROM MESSAGE
-        const userName = message.author?.username || message.author?.displayName || 'there';
+        const userName = message.author?.displayName || message.author?.username || 'there';
 
         // Rate limiting per user
         const now = Date.now();

@@ -222,7 +222,7 @@ async function handleSelectMenuInteraction(interaction, client) {
     try {
         if (interaction.customId === 'selfrole_select') {
             await handleSelfRoleSelection(interaction, client);
-        } else if (interaction.customId === 'ticketstaffroles') {
+            } else if (interaction.customId === 'ticket_staff_roles') {
             await handleTicketStaffRoleSelection(interaction, client);
         } else if (interaction.customId.startsWith('filter_')) {
             await handleFilterSelection(interaction, client);

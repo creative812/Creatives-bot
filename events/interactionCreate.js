@@ -11,7 +11,8 @@ const {
     TextInputBuilder, 
     TextInputStyle, 
     EmbedBuilder,
-    StringSelectMenuBuilder
+    StringSelectMenuBuilder,
+    MessageFlags
 } = require('discord.js');
 
 module.exports = {
@@ -41,7 +42,7 @@ module.exports = {
                 await handleAutocomplete(interaction, client);
             }
         } catch (error) {
-            client.logger.error('Error in interactionCreate handler:', error);
+            client.logger?.error('Error in interactionCreate handler:', error);
         }
     }
 };
@@ -51,15 +52,15 @@ async function handleSlashCommand(interaction, client) {
     const command = client.commands.get(interaction.commandName);
 
     if (!command) {
-        client.logger.warn(`Unknown slash command: ${interaction.commandName}`);
+        client.logger?.warn(`Unknown slash command: ${interaction.commandName}`);
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('Unknown Command', 'This command is not recognized.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
-    // Check if command is disabled - NEW FEATURE
-    const disabledCommand = client.db.getDisabledCommand(interaction.guild.id, interaction.commandName);
+    // Check if command is disabled
+    const disabledCommand = client.db.getDisabledCommand?.(interaction.guild.id, interaction.commandName);
     if (disabledCommand) {
         const disabledEmbed = EmbedManager.createErrorEmbed(
             '🔒 Command Disabled', 
@@ -74,7 +75,7 @@ async function handleSlashCommand(interaction, client) {
 
         return safeReply(interaction, {
             embeds: [disabledEmbed],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -92,7 +93,7 @@ async function handleSlashCommand(interaction, client) {
 
         return safeReply(interaction, {
             embeds: [permissionEmbed],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -110,7 +111,7 @@ async function handleSlashCommand(interaction, client) {
                     '⏰ Cooldown Active',
                     `Please wait ${remainingTime} second(s) before using this command again.`
                 )],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     }
@@ -123,14 +124,14 @@ async function handleSlashCommand(interaction, client) {
         await command.execute(interaction, client);
 
         // Log command usage with enhanced details
-        if (client.logger && client.logger.logCommand) {
+        if (client.logger?.logCommand) {
             client.logger.logCommand(interaction.commandName, interaction.user, interaction.guild, {
                 options: interaction.options?.data,
                 channel: interaction.channel?.name
             });
         }
     } catch (error) {
-        client.logger.error(`Error executing slash command ${interaction.commandName}:`, error);
+        client.logger?.error(`Error executing slash command ${interaction.commandName}:`, error);
 
         const errorEmbed = EmbedManager.createErrorEmbed(
             '💥 Command Error', 
@@ -143,9 +144,9 @@ async function handleSlashCommand(interaction, client) {
         .setColor('#FF0000');
 
         if (interaction.replied || interaction.deferred) {
-            await safeReply(interaction, { embeds: [errorEmbed], ephemeral: true }, true);
+            await safeReply(interaction, { embeds: [errorEmbed], flags: MessageFlags.Ephemeral }, true);
         } else {
-            await safeReply(interaction, { embeds: [errorEmbed], ephemeral: true });
+            await safeReply(interaction, { embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
         }
     }
 }
@@ -154,14 +155,14 @@ async function handleSlashCommand(interaction, client) {
 async function handleAutocomplete(interaction, client) {
     const command = client.commands.get(interaction.commandName);
 
-    if (!command || !command.autocomplete) {
+    if (!command?.autocomplete) {
         return;
     }
 
     try {
         await command.autocomplete(interaction);
     } catch (error) {
-        client.logger.error(`Error in autocomplete for ${interaction.commandName}:`, error);
+        client.logger?.error(`Error in autocomplete for ${interaction.commandName}:`, error);
     }
 }
 
@@ -203,15 +204,15 @@ async function handleButtonInteraction(interaction, client) {
                     '❓ Unknown Button', 
                     'This button interaction is not recognized or may have expired.'
                 )],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     } catch (error) {
-        client.logger.error('Error handling button interaction:', error);
+        client.logger?.error('Error handling button interaction:', error);
         if (!interaction.replied && !interaction.deferred) {
             await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('💥 Button Error', 'An error occurred while processing your request.')],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     }
@@ -222,22 +223,22 @@ async function handleSelectMenuInteraction(interaction, client) {
     try {
         if (interaction.customId === 'selfrole_select') {
             await handleSelfRoleSelection(interaction, client);
-            } else if (interaction.customId === 'ticket_staff_roles') {
+        } else if (interaction.customId === 'ticket_staff_roles') {
             await handleTicketStaffRoleSelection(interaction, client);
         } else if (interaction.customId.startsWith('filter_')) {
             await handleFilterSelection(interaction, client);
         } else {
             await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('❓ Unknown Menu', 'This select menu interaction is not recognized.')],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     } catch (error) {
-        client.logger.error('Error handling select menu interaction:', error);
+        client.logger?.error('Error handling select menu interaction:', error);
         if (!interaction.replied && !interaction.deferred) {
             await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('💥 Menu Error', 'An error occurred while processing your selection.')],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     }
@@ -255,15 +256,15 @@ async function handleModalSubmit(interaction, client) {
         } else {
             await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('❓ Unknown Modal', 'This modal submission is not recognized.')],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     } catch (error) {
-        client.logger.error('Error handling modal submit:', error);
+        client.logger?.error('Error handling modal submit:', error);
         if (!interaction.replied && !interaction.deferred) {
             await safeReply(interaction, {
                 embeds: [EmbedManager.createErrorEmbed('💥 Modal Error', 'An error occurred while processing your request.')],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     }
@@ -277,14 +278,14 @@ async function handleGiveawayEntry(interaction, client) {
     if (!giveaway) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎁 Giveaway Not Found', 'This giveaway no longer exists.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
     if (giveaway.ended) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎁 Giveaway Ended', 'This giveaway has already ended.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -292,7 +293,7 @@ async function handleGiveawayEntry(interaction, client) {
     if (new Date(giveaway.endsat) < new Date()) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎁 Giveaway Expired', 'This giveaway has expired.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -308,7 +309,7 @@ async function handleGiveawayEntry(interaction, client) {
         await interaction.update({ embeds: [embed] });
         await safeReply(interaction, {
             embeds: [EmbedManager.createSuccessEmbed('✅ Left Giveaway', 'You have successfully left the giveaway.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         }, true);
     } else {
         // Add entry
@@ -319,56 +320,83 @@ async function handleGiveawayEntry(interaction, client) {
         await interaction.update({ embeds: [embed] });
         await safeReply(interaction, {
             embeds: [EmbedManager.createSuccessEmbed('🎉 Entered Giveaway', 'You have successfully entered the giveaway!')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         }, true);
     }
 }
 
-// Enhanced ticket creation
+// TICKET SYSTEM - Enhanced ticket creation with FIXED PERMISSIONS
 async function handleCreateTicketButton(interaction, client) {
     const settings = client.db.getTicketSettings(interaction.guild.id);
 
     if (!settings) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🎫 Ticket System Not Setup', 'The ticket system has not been configured for this server.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
-    const category = interaction.guild.channels.cache.get(settings.categoryid);
+    const category = interaction.guild.channels.cache.get(settings.category_id);
     if (!category) {
         return safeReply(interaction, {
-            embeds: [EmbedManager.createErrorEmbed('🎫 Category Not Found', 'The ticket category could not be found.')],
-            ephemeral: true
+            embeds: [EmbedManager.createErrorEmbed('🎫 Category Not Found', 'The ticket category could not be found. Please run /ticket-setup again.')],
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // ADDED: Check bot permissions BEFORE attempting to create channel
+    const botMember = interaction.guild.members.me;
+    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+        return safeReply(interaction, {
+            embeds: [EmbedManager.createErrorEmbed(
+                '🚫 Bot Missing Permissions', 
+                'I need **Manage Channels** permission to create ticket channels. Please contact an administrator.'
+            )],
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Check bot permissions in the category
+    const categoryPermissions = category.permissionsFor(botMember);
+    if (!categoryPermissions.has(PermissionsBitField.Flags.ManageChannels)) {
+        return safeReply(interaction, {
+            embeds: [EmbedManager.createErrorEmbed(
+                '🚫 Bot Missing Category Permissions', 
+                'I need **Manage Channels** permission in the ticket category. Please contact an administrator.'
+            )],
+            flags: MessageFlags.Ephemeral
         });
     }
 
     // Check if user already has an open ticket
-    const existingTicket = client.db.getUserTicket(interaction.guild.id, interaction.user.id);
+    const existingTicket = client.db.getUserTicket?.(interaction.guild.id, interaction.user.id);
     if (existingTicket) {
         return safeReply(interaction, {
-            embeds: [EmbedManager.createErrorEmbed('🎫 Ticket Already Exists', `You already have an open ticket: <#${existingTicket.channelid}>`)],
-            ephemeral: true
+            embeds: [EmbedManager.createErrorEmbed('🎫 Ticket Already Exists', `You already have an open ticket: <#${existingTicket.channel_id}>`)],
+            flags: MessageFlags.Ephemeral
         });
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
-        // Create ticket channel with enhanced setup
-        const ticketNumber = client.db.getNextTicketNumber(interaction.guild.id);
+        // Get next ticket number
+        const ticketNumber = client.db.getNextTicketNumber ? 
+            client.db.getNextTicketNumber(interaction.guild.id) :
+            (settings.next_ticket_number || 1);
+
         const channelName = `ticket-${ticketNumber.toString().padStart(4, '0')}`;
 
         // Parse staff role IDs safely
         let staffRoleIds = [];
-        if (settings.staffroleids) {
+        if (settings.staff_role_ids) {
             try {
-                staffRoleIds = JSON.parse(settings.staffroleids);
+                staffRoleIds = JSON.parse(settings.staff_role_ids);
                 if (!Array.isArray(staffRoleIds)) {
-                    staffRoleIds = [settings.staffroleids];
+                    staffRoleIds = [settings.staff_role_ids];
                 }
             } catch {
-                staffRoleIds = [settings.staffroleids];
+                staffRoleIds = [settings.staff_role_ids];
             }
         }
 
@@ -396,7 +424,8 @@ async function handleCreateTicketButton(interaction, client) {
                     PermissionsBitField.Flags.ReadMessageHistory,
                     PermissionsBitField.Flags.AttachFiles,
                     PermissionsBitField.Flags.ManageMessages,
-                    PermissionsBitField.Flags.EmbedLinks
+                    PermissionsBitField.Flags.EmbedLinks,
+                    PermissionsBitField.Flags.ManageChannels // ADDED: Bot needs this to manage the ticket
                 ]
             }
         ];
@@ -432,8 +461,8 @@ async function handleCreateTicketButton(interaction, client) {
             interaction.guild.id,
             interaction.user.id,
             ticketChannel.id,
-            ticketNumber,
-            'Created via ticket panel'
+            'Created via ticket panel',
+            ticketNumber
         );
 
         // Create enhanced ticket embed
@@ -480,8 +509,8 @@ async function handleCreateTicketButton(interaction, client) {
         });
 
         // Enhanced logging
-        if (settings.logchannelid) {
-            const logChannel = interaction.guild.channels.cache.get(settings.logchannelid);
+        if (settings.log_channel_id) {
+            const logChannel = interaction.guild.channels.cache.get(settings.log_channel_id);
             if (logChannel) {
                 const logEmbed = EmbedManager.createEmbed(
                     '🎫 New Ticket Created',
@@ -498,9 +527,15 @@ async function handleCreateTicketButton(interaction, client) {
             }
         }
     } catch (error) {
-        client.logger.error('Error creating ticket from button:', error);
+        client.logger?.error('Error creating ticket from button:', error);
+
+        let errorMessage = 'Failed to create ticket channel. Please contact an administrator.';
+        if (error.code === 50013) {
+            errorMessage = 'I don\'t have permission to create channels. Please ensure I have **Manage Channels** permission in this server and the ticket category.';
+        }
+
         await interaction.editReply({
-            embeds: [EmbedManager.createErrorEmbed('💥 Error', 'Failed to create ticket channel. Please contact an administrator.')]
+            embeds: [EmbedManager.createErrorEmbed('💥 Error', errorMessage)]
         });
     }
 }
@@ -512,7 +547,7 @@ async function handleCloseTicketButton(interaction, client) {
     if (!ticket) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('❌ Not a Ticket', 'This button can only be used in ticket channels.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -522,7 +557,7 @@ async function handleCloseTicketButton(interaction, client) {
     let canClose = false;
 
     // Ticket owner can close
-    if (ticket.userid === interaction.user.id) {
+    if (ticket.user_id === interaction.user.id) {
         canClose = true;
     }
 
@@ -532,22 +567,22 @@ async function handleCloseTicketButton(interaction, client) {
     }
 
     // Check staff roles
-    if (!canClose && settings?.staffroleids) {
+    if (!canClose && settings?.staff_role_ids) {
         try {
-            let staffRoleIds = JSON.parse(settings.staffroleids);
+            let staffRoleIds = JSON.parse(settings.staff_role_ids);
             if (!Array.isArray(staffRoleIds)) {
-                staffRoleIds = [settings.staffroleids];
+                staffRoleIds = [settings.staff_role_ids];
             }
             canClose = staffRoleIds.some(roleId => interaction.member.roles.cache.has(roleId));
         } catch {
-            canClose = interaction.member.roles.cache.has(settings.staffroleids);
+            canClose = interaction.member.roles.cache.has(settings.staff_role_ids);
         }
     }
 
     if (!canClose) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🚫 Permission Denied', 'Only staff members or the ticket owner can close tickets.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -577,25 +612,25 @@ async function handleClaimTicketButton(interaction, client) {
     if (!ticket) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('❌ Not a Ticket', 'This button can only be used in ticket channels.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
     if (!PermissionManager.isHelper(interaction.member)) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('🚫 Permission Denied', 'Only staff members can claim tickets.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
-    if (ticket.claimedby) {
-        const claimedUser = await client.users.fetch(ticket.claimedby).catch(() => null);
+    if (ticket.claimed_by) {
+        const claimedUser = await client.users.fetch(ticket.claimed_by).catch(() => null);
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed(
                 '⚠️ Already Claimed', 
                 `This ticket is already claimed by ${claimedUser ? claimedUser.tag : 'Unknown User'}`
             )],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -617,7 +652,7 @@ async function handleClaimTicketButton(interaction, client) {
             await interaction.channel.setName(`${currentName}-claimed`);
         }
     } catch (error) {
-        client.logger.warn('Could not update channel name for claimed ticket:', error.message);
+        client.logger?.warn('Could not update channel name for claimed ticket:', error.message);
     }
 }
 
@@ -630,7 +665,7 @@ async function handleTicketCloseModal(interaction, client) {
     if (!ticket) {
         return safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('❌ Not a Ticket', 'This modal can only be used in ticket channels.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -654,22 +689,22 @@ async function handleTicketCloseModal(interaction, client) {
 
         // Enhanced logging
         const settings = client.db.getTicketSettings(interaction.guild.id);
-        if (settings?.logchannelid) {
-            const logChannel = interaction.guild.channels.cache.get(settings.logchannelid);
+        if (settings?.log_channel_id) {
+            const logChannel = interaction.guild.channels.cache.get(settings.log_channel_id);
             if (logChannel) {
-                const user = await client.users.fetch(ticket.userid).catch(() => null);
-                const duration = Math.round((Date.now() - new Date(ticket.createdat).getTime()) / 60000);
+                const user = await client.users.fetch(ticket.user_id).catch(() => null);
+                const duration = Math.round((Date.now() - new Date(ticket.created_at).getTime()) / 60000);
 
                 const logEmbed = EmbedManager.createEmbed(
                     '🔒 Ticket Closed',
-                    `Ticket #${ticket.ticketnumber} has been closed`,
+                    `Ticket #${ticket.ticket_number} has been closed`,
                     null
                 ).addFields(
                     { name: '👤 Original Creator', value: user ? `${user.tag} (${user.id})` : 'Unknown User', inline: true },
                     { name: '🔒 Closed By', value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
                     { name: '📝 Reason', value: closeReason, inline: false },
                     { name: '⏱️ Duration', value: `${duration} minutes`, inline: true },
-                    { name: '🙋 Claimed By', value: ticket.claimedby ? `<@${ticket.claimedby}>` : 'Unclaimed', inline: true }
+                    { name: '🙋 Claimed By', value: ticket.claimed_by ? `<@${ticket.claimed_by}>` : 'Unclaimed', inline: true }
                 ).setColor('#FF0000').setTimestamp();
 
                 await logChannel.send({ embeds: [logEmbed] });
@@ -683,11 +718,11 @@ async function handleTicketCloseModal(interaction, client) {
                     await interaction.channel.delete('Ticket closed');
                 }
             } catch (error) {
-                client.logger.error('Error deleting ticket channel:', error);
+                client.logger?.error('Error deleting ticket channel:', error);
             }
         }, 10000);
     } catch (error) {
-        client.logger.error('Error closing ticket from modal:', error);
+        client.logger?.error('Error closing ticket from modal:', error);
         await interaction.editReply({
             embeds: [EmbedManager.createErrorEmbed('💥 Error', 'Failed to close ticket. Please try again.')]
         });
@@ -756,12 +791,12 @@ async function handleSelfRoleSelection(interaction, client) {
 
         const embed = EmbedManager.createSuccessEmbed('🎭 Roles Updated', description.trim());
 
-        await safeReply(interaction, { embeds: [embed], ephemeral: true });
+        await safeReply(interaction, { embeds: [embed], flags: MessageFlags.Ephemeral });
     } catch (error) {
-        client.logger.error('Error updating self-roles:', error);
+        client.logger?.error('Error updating self-roles:', error);
         await safeReply(interaction, {
             embeds: [EmbedManager.createErrorEmbed('💥 Error', 'Failed to update your roles. Please try again.')],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 }
@@ -770,26 +805,28 @@ async function handleSelfRoleSelection(interaction, client) {
 async function handleTicketStaffRoleSelection(interaction, client) {
     if (!client.tempPanelData) client.tempPanelData = new Map();
 
-    const storageKey = interaction.user.id + interaction.guild.id;
+    const storageKey = `${interaction.user.id}_${interaction.guild.id}`;
     const panelData = client.tempPanelData.get(storageKey);
 
     if (!panelData) {
         return safeReply(interaction, {
             content: '❌ Panel setup session expired. Please run the command again.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
     const selectedRoleIds = interaction.values;
 
-    // Update settings with selected staff roles
-    client.db.setTicketSettings(
-        panelData.guildId, 
-        null, // category will remain the same
-        JSON.stringify(selectedRoleIds), 
-        null, // log channel will remain the same
-        null // ticket number will remain the same
-    );
+    // Get current settings
+    const currentSettings = client.db.getTicketSettings(panelData.guildId);
+
+    // Update settings with camelCase for database helper
+    client.db.setTicketSettings(panelData.guildId, {
+        categoryId: currentSettings?.category_id,
+        logChannelId: currentSettings?.log_channel_id,
+        staffRoleIds: selectedRoleIds,  // Pass as array, helper will JSON.stringify
+        nextTicketNumber: currentSettings?.next_ticket_number || 1
+    });
 
     // Create the ticket panel
     const embed = EmbedManager.createEmbed(
@@ -806,10 +843,17 @@ async function handleTicketStaffRoleSelection(interaction, client) {
 
     const row = new ActionRowBuilder().addComponents(button);
 
+    // First update the interaction to confirm
     await interaction.update({
-        content: '✅ **Step 2 Complete!** Here is your ticket panel:',
+        content: '✅ **Step 2 Complete!** Ticket panel created below.',
+        components: []
+    });
+
+    // Then send the PUBLIC ticket panel
+    await interaction.followUp({
         embeds: [embed],
         components: [row]
+        // No flags = public message
     });
 
     // Clean up temp data
@@ -832,40 +876,40 @@ function createGiveawayEmbed(giveaway, entryCount) {
     return embed;
 }
 
-// Placeholder handlers for future features
+// Placeholder handlers for future features (PRESERVED)
 async function handleLeaderboardPagination(interaction, client) {
-    await safeReply(interaction, { content: 'Leaderboard pagination coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Leaderboard pagination coming soon!', flags: MessageFlags.Ephemeral });
 }
 
 async function handleUserProfilePagination(interaction, client) {
-    await safeReply(interaction, { content: 'User profile pagination coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'User profile pagination coming soon!', flags: MessageFlags.Ephemeral });
 }
 
 async function handleWarnConfirmation(interaction, client) {
-    await safeReply(interaction, { content: 'Warning confirmation coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Warning confirmation coming soon!', flags: MessageFlags.Ephemeral });
 }
 
 async function handleMuteConfirmation(interaction, client) {
-    await safeReply(interaction, { content: 'Mute confirmation coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Mute confirmation coming soon!', flags: MessageFlags.Ephemeral });
 }
 
 async function handleRoleButton(interaction, client) {
-    await safeReply(interaction, { content: 'Role button handling coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Role button handling coming soon!', flags: MessageFlags.Ephemeral });
 }
 
 async function handleFilterSelection(interaction, client) {
-    await safeReply(interaction, { content: 'Filter selection coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Filter selection coming soon!', flags: MessageFlags.Ephemeral });
 }
 
 async function handleReportModal(interaction, client) {
-    await safeReply(interaction, { content: 'Report modal coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Report modal coming soon!', flags: MessageFlags.Ephemeral });
 }
 
 async function handleSuggestionModal(interaction, client) {
-    await safeReply(interaction, { content: 'Suggestion modal coming soon!', ephemeral: true });
+    await safeReply(interaction, { content: 'Suggestion modal coming soon!', flags: MessageFlags.Ephemeral });
 }
 
-// Safe reply function to handle interaction states
+// FIXED: Safe reply function with proper flags
 async function safeReply(interaction, options, isFollowUp = false) {
     try {
         if (interaction.replied || interaction.deferred) {

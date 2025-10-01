@@ -34,7 +34,7 @@ module.exports = {
                     const logChannel = interaction.options.getChannel('log-channel');
                     const guildId = interaction.guild.id;
 
-                    // Save ticket settings to database
+                    // Save ticket settings to database - FIXED: Using camelCase
                     client.db.setTicketSettings(guildId, {
                         categoryId: category.id,
                         logChannelId: logChannel.id,
@@ -52,7 +52,7 @@ module.exports = {
 
                 } catch (error) {
                     console.error('Error in ticket setup:', error);
-                    client.logger.error('Error in ticket setup:', error);
+                    client.logger?.error('Error in ticket setup:', error);
 
                     if (!interaction.replied) {
                         await interaction.reply({ 
@@ -85,7 +85,7 @@ module.exports = {
                 try {
                     const guildId = interaction.guild.id;
 
-                    // Check if ticket system is setup
+                    // Check if ticket system is setup - FIXED: Using snake_case for DB return
                     let settings = client.db.getTicketSettings(guildId);
 
                     if (!settings || !settings.category_id) {
@@ -159,7 +159,7 @@ module.exports = {
 
                 } catch (error) {
                     console.error('Error in ticket panel command:', error);
-                    client.logger.error('Error in ticket panel:', error);
+                    client.logger?.error('Error in ticket panel:', error);
 
                     if (!interaction.replied) {
                         await interaction.reply({
@@ -184,22 +184,16 @@ module.exports = {
                 try {
                     const channelId = interaction.channel.id;
 
-                    // IMPROVED: Try multiple methods to find ticket
+                    // Try multiple methods to find ticket
                     let ticket = null;
 
-                    // Method 1: Direct lookup by channel and status
+                    // Method 1: Direct lookup by channel
                     ticket = client.db.getTicketByChannel(channelId);
 
                     // Method 2: Search all open tickets if direct lookup fails
                     if (!ticket) {
                         const allTickets = client.db.getOpenTickets(interaction.guild.id);
-                        ticket = allTickets.find(t => t.channel_id === channelId);
-                    }
-
-                    // Method 3: Search by any status if still not found
-                    if (!ticket) {
-                        const stmt = client.db.db.prepare("SELECT * FROM tickets WHERE channel_id = ?");
-                        ticket = stmt.get(channelId);
+                        ticket = allTickets?.find(t => t.channel_id === channelId);
                     }
 
                     if (!ticket) {
@@ -256,13 +250,13 @@ module.exports = {
                             }
                         } catch (error) {
                             console.error('Error deleting ticket channel:', error);
-                            client.logger.error('Error deleting ticket channel:', error);
+                            client.logger?.error('Error deleting ticket channel:', error);
                         }
                     }, 10000);
 
                 } catch (error) {
                     console.error('Error closing ticket:', error);
-                    client.logger.error('Error closing ticket:', error);
+                    client.logger?.error('Error closing ticket:', error);
 
                     try {
                         if (interaction.deferred) {
